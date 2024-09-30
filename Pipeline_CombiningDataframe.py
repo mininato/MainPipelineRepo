@@ -61,10 +61,10 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         df_reports, df_accel = X
 
         valid_conditions = (
-            (df_reports['timeOfEngagement'] != 0) &     # Filter out rows with missing values
-            (df_reports['valence'] != "NONE") &         # Filter out rows with 'NONE' values
-            (df_reports['arousal'] != "NONE") &         # Filter out rows with 'NONE' values
-            (df_reports['context'] != "NONE")           # Filter out rows with 'NONE' values
+            (df_reports['timeOfEngagement'] != 0) &
+            (df_reports['valence'] != "NONE") &
+            (df_reports['arousal'] != "NONE") &
+            (df_reports['context'] != "NONE")
         )
         df_reports = df_reports[valid_conditions].copy()
 
@@ -87,16 +87,16 @@ class ExtractAccelData(BaseEstimator, TransformerMixin):
         return df_reports
 
     def _extract_accel_data(self, row, accel_data):
-        time_delta = pd.Timedelta(minutes=self.time_window)         
+        time_delta = pd.Timedelta(minutes=self.time_window)
         start_time = row['timeOfNotification'] - time_delta
         end_time = row['timeOfNotification'] + time_delta
         participant_id = row['participantId']
         mask = (
-            (accel_data['participantId'] == participant_id) &       # Filter out rows with different participantId
-            (accel_data['timeOfNotification'] >= start_time) &      # Filter out rows with time outside the window
-            (accel_data['timeOfNotification'] <= end_time)          # Filter out rows with time outside the window
+            (accel_data['participantId'] == participant_id) &
+            (accel_data['timeOfNotification'] >= start_time) &
+            (accel_data['timeOfNotification'] <= end_time)
         )
-        return accel_data[mask]                                     # Return the filtered rows
+        return accel_data[mask]
 
 class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
@@ -109,31 +109,29 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
             accel_data = row['accel_data']
             for _, accel_row in accel_data.iterrows():
                 combined_data.append({
-                    'participantId': row['participantId'],          # Add participantId to the combined data
-                    'selfreport_time': row['timeOfNotification'],   # Add selfreport_time to the combined data
-                    'valence': row['valence'],                      # Add valence to the combined data
-                    'arousal': row['arousal'],                      # Add arousal to the combined data
-                    'context': row['context'],                      # Add context to the combined data
-                    'accel_time': accel_row['timeOfNotification'],  # Add accel_time to the combined data
-                    'x': accel_row['x'],                            # Add x, y, z to the combined data
+                    'participantId': row['participantId'],
+                    'selfreport_time': row['timeOfNotification'],
+                    'valence': row['valence'],
+                    'arousal': row['arousal'],
+                    'context': row['context'],
+                    'accel_time': accel_row['timeOfNotification'],
+                    'x': accel_row['x'],
                     'y': accel_row['y'],
                     'z': accel_row['z']
                 })
 
         combined_df = pd.DataFrame(combined_data)
-
-        # Create reportId
-        combined_df['reportId'] = combined_df.groupby(['participantId', 'selfreport_time']).ngroup() + 1    # Create unique reportId
-        col = combined_df.pop("reportId")                                                                   # Move reportId to the first column
-        combined_df.insert(0, col.name, col)
-
-        # Export combined dataframe to CSV
-        time_window_str = str(self.time_window)
-        file_name = f"combined_data_timewindow_{time_window_str}min.csv"
-        combined_df.to_csv(file_name, index=False)
-        print(f"Combined dataframe exported successfully to {file_name}.")
-        
         return combined_df
+
+class CreateReportID(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X['reportId'] = X.groupby(['participantId', 'selfreport_time']).ngroup() + 1
+        col = X.pop("reportId")
+        X.insert(0, col.name, col)
+        return X
 
 class ScaleXYZData(BaseEstimator, TransformerMixin):
     def __init__(self, scaler_type='standard'):
@@ -143,28 +141,28 @@ class ScaleXYZData(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        columns_to_scale = ['x', 'y', 'z']                  
-        if self.scaler_type == 'standard':                  # Scale the columns using StandardScaler or MinMaxScaler
+        columns_to_scale = ['x', 'y', 'z']
+        if self.scaler_type == 'standard':
             scaler = StandardScaler()
         elif self.scaler_type == 'minmax':
             scaler = MinMaxScaler()
         else:
-            raise ValueError("Invalid scaler_type. Expected 'standard' or 'minmax'.")   # Raise an error if scaler_type is invalid
+            raise ValueError("Invalid scaler_type. Expected 'standard' or 'minmax'.")
         scaled_columns = scaler.fit_transform(X[columns_to_scale])
         scaled_df = pd.DataFrame(scaled_columns, columns=columns_to_scale, index=X.index)
         X[columns_to_scale] = scaled_df
         return X
 
-# class PreprocessCombinedDataframe(BaseEstimator, TransformerMixin):
-#     def fit(self, X, y=None):
-#         return self
+class PreprocessCombinedDataframe(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
 
-#     def transform(self, X):
-#         X = X.drop(['participantId', 'selfreport_time'], axis=1)
-#         X.rename(columns={"accel_time": "datetime"}, inplace=True)
-#         X['datetime'] = pd.DatetimeIndex(X["datetime"]).astype(np.int64) / 1000000  # Convert to Unix time in seconds
-#         print("Data preprocessed successfully.")
-#         return X
+    def transform(self, X):
+        X = X.drop(['participantId', 'selfreport_time'], axis=1)
+        X.rename(columns={"accel_time": "datetime"}, inplace=True)
+        X['datetime'] = pd.DatetimeIndex(X["datetime"]).astype(np.int64) / 1000000  # Convert to Unix time in seconds
+        print("Data preprocessed successfully.")
+        return X
 
 class ExtractFeatures(BaseEstimator, TransformerMixin):
     def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False):
@@ -181,33 +179,26 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         features_list = []
 
         for report_id in X['reportId'].unique():
-            temp = X[X['reportId'] == report_id]                            # takes all rows with the same reportId
-            temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed  
-            windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
+            temp = X[X['reportId'] == report_id]
+            temp_ex = temp[['datetime', 'x', 'y', 'z']].copy()
+            windows = self._window_data(temp_ex[['x', 'y', 'z']])
             for window in windows:
-                features = self._extract_features_from_window(window)       # extracts features from each window
-                features['reportId'] = report_id                            # adds reportId to the features
-                features['arousal'] = temp['arousal'].iloc[0]               # adds arousal and valence to the features
-                features['valence'] = temp['valence'].iloc[0]               
-                features['context'] = temp['context'].iloc[0]               # adds context to the features
-                features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
-                features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
+                features = self._extract_features_from_window(window)
+                features['reportId'] = report_id
+                features['arousal'] = temp['arousal'].iloc[0]
+                features['valence'] = temp['valence'].iloc[0]
+                features['context'] = temp['context'].iloc[0]
+                features_list.append(pd.DataFrame([features]))  # Convert dictionary to DataFrame
 
-        all_features = pd.concat(features_list, ignore_index=True)
-
-        # Export features to CSV
-        window_length_str = str(self.window_length)
-        window_step_size_str = str(self.window_step_size)
-        file_name = f"features_window_{window_length_str}_step_{window_step_size_str}.csv"
-        all_features.to_csv(file_name, index=False)
+        all_features = pd.concat(features_list, ignore_index=True) 
 
         print("All features extracted successfully.")
         return all_features
 
     def _window_data(self, data):
-        window_samples = int(self.window_length * self.data_frequency)                                              # Number of samples in each window
-        step_samples = int(self.window_step_size * self.data_frequency)                                             # Number of samples to move the window
-        windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]      # Create windows
+        window_samples = int(self.window_length * self.data_frequency)
+        step_samples = int(self.window_step_size * self.data_frequency)
+        windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]
         return np.array(windows)
 
     def _extract_features_from_window(self, window):
@@ -405,7 +396,20 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
 
     def _calculate_magnitude(self, window):
         return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+    
+class FeatureSelectionAndEncoding(BaseEstimator, TransformerMixin):
+    def __init__(self, target="arousal_valence"):
+        self.target = target
+        self.label_encoder = LabelEncoder()
 
+    def fit(self, X, y=None):
+        self.label_encoder.fit(X[self.target])
+        return self
+
+    def transform(self, X):
+        X['target'] = self.label_encoder.transform(X[self.target])
+        return X.drop(columns=[self.target])
+    
 class PCAHandler(BaseEstimator, TransformerMixin):
     def __init__(self, apply_pca=False, variance=0.95):
         self.apply_pca = apply_pca
@@ -423,22 +427,7 @@ class PCAHandler(BaseEstimator, TransformerMixin):
             X_transformed = self.pca.transform(X)
             return pd.DataFrame(X_transformed, index=X.index)
         return X
-        
-class FeatureSelectionAndEncoding(BaseEstimator, TransformerMixin):
-    def __init__(self, target="arousal_valence"): # Target column to encode #TODO No arousal_valence column has been made yet - add it to the combined dataframe
-        self.target = target
-        self.label_encoder = LabelEncoder()
-
-    def fit(self, X, y=None):
-        self.label_encoder.fit(X[self.target])
-        return self
-
-    def transform(self, X):                                         #TODO renew the encoding system
-        
-        X['target'] = self.label_encoder.transform(X[self.target])
-        return X.drop(columns=[self.target])
     
-
 class TrainModel(BaseEstimator, TransformerMixin):
     def __init__(self, config):
         self.config = config
@@ -490,50 +479,28 @@ class TrainModel(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return X
 
-# Full training pipeline including every step
-full_training_pipeline = Pipeline([
+training_pipeline = Pipeline([
     ('import_data', ImportData(accel_path="path/to/AccelerometerData.csv", reports_path="path/to/SelfReports.csv")),
     ('preprocessing', Preprocessing()),
     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
     ('create_combined_dataframe', CreateCombinedDataFrame()),
+    ('label_with_report_id', CreateReportID()),
     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-    # ('preprocess_combined_dataframe', PreprocessCombinedDataframe()),
+    ('preprocess_combined_dataframe', PreprocessCombinedDataframe()),
     ('extract_features', ExtractFeatures(window_length=config["window_length"], 
                                          window_step_size=config["window_step_size"], 
                                          data_frequency=config["data_frequency"], 
                                          selected_domains=config["selected_domains"], 
                                          include_magnitude=config["include_magnitude"])),
-    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-    ('feature_selection', FeatureSelectionAndEncoding(target="arousal_valence")),
-    ('train_model', TrainModel(config=config)),
-])
-
-# Given Pipeline for combining dataframes
-combining_dataframes_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="path/to/AccelerometerData.csv", reports_path="path/to/SelfReports.csv")),
-    ('preprocessing', Preprocessing()),
-    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-    ('create_combined_dataframe', CreateCombinedDataFrame()),
-])
-
-# Given model training pipeline
-training_model_pipeline = Pipeline([
-    ('extract_features', ExtractFeatures(window_length=config["window_length"], 
-                                         window_step_size=config["window_step_size"], 
-                                         data_frequency=config["data_frequency"], 
-                                         selected_domains=config["selected_domains"], 
-                                         include_magnitude=config["include_magnitude"])),
-    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
     ('feature_selection', FeatureSelectionAndEncoding(target="arousal_valence")),
     ('train_model', TrainModel(config=config)),
 ])
 
 
+# Step 3: Run the pipeline
+all_features = training_pipeline.fit_transform(None)
+print("Pipeline executed successfully.")
 
-# # Step 3: Run the pipeline
-# all_features = training_pipeline.fit_transform(None)
-# print("Pipeline executed successfully.")
-
-# # Step 4: Save the output to CSV
-# all_features.to_csv("Manual_60_20_Full.csv", encoding='utf-8', index=False)
-# print("Features saved successfully.")
+# Step 4: Save the output to CSV
+all_features.to_csv("Manual_60_20_Full.csv", encoding='utf-8', index=False)
+print("Features saved successfully.")
