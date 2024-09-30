@@ -16,27 +16,42 @@ import pywt
 from scipy.fft import fft
 from scipy.signal import welch
 
+
+
 # Configuration for default settings
 config = {
+    # Configuration for default settings
+
+    # Configuration for data import
+    "time_window": 3,  # Time window in minutes
+    "scaler_type": "standard",  # 'standard' or 'minmax'
+
+    # Configuration for feature extraction
+    "window_length": 60,  # Window length in seconds
+    "window_step_size": 20,  # Step size in seconds / 10%-50% of window_length
+    "data_frequency": 25,  # Data frequency in Hz
+    "selected_domains": None,  # Default: Every domain / 'time_domain', 'spatial', 'frequency', 'statistical', 'wavelet'
+    "include_magnitude": True,  # Include magnitude-based features or not
+
+    # Configuration for PCA
+    "apply_pca": False,  # Apply PCA or not
+    "pca_variance": 0.95,  # PCA variance threshold
+
+    # Configuration for model training
     "classifier": "xgboost",  # Default classifier ('xgboost', 'svm', 'randomforest')
+    "target": "combined",  # Target to train ('combined', 'arousal', 'valence')
+
+    # Configuration for hyperparameter tuning
     "n_splits": 5,
     "n_iter": 30,
     "n_jobs": -1,
     "n_points": 1,
-    "scaler_type": "standard",  # 'standard' or 'minmax'
-    "apply_pca": False,
-    "pca_variance": 0.95,
-    "time_window": 3,
-    "window_length": 60,
-    "window_step_size": 20,
-    "data_frequency": 25,
-    "include_magnitude": True,
-    "selected_domains": ["time_domain", "frequency"],  # Default feature domains
-    "model_to_train": ["combined", "arousal", "valence"],  # Models to train: 'combined', 'arousal', 'valence'
-    }
 
-# Step 1: Define classes for each step in the pipeline
+    # If users want to define custom param_space, they can specify it here
+    "param_space": None,  # Set to None to use default inside the TrainModel class
+}
 
+# Pipeline Classes
 class ImportData(BaseEstimator, TransformerMixin):
     def __init__(self, accel_path, reports_path):
         self.accel_path = accel_path
@@ -127,6 +142,12 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
         col = combined_df.pop("reportId")                                                                   # Move reportId to the first column
         combined_df.insert(0, col.name, col)
 
+        # Create arousal_valence column
+        combined_df['combined'] = combined_df['arousal'].astype(str) + "_" + combined_df['valence'].astype(str)
+
+        # Drop rows with missing values
+        combined_df.dropna(subset=['arousal', 'valence', 'reportId', 'combined'], inplace=True)
+
         # Export combined dataframe to CSV
         time_window_str = str(self.time_window)
         file_name = f"combined_data_timewindow_{time_window_str}min.csv"
@@ -148,23 +169,15 @@ class ScaleXYZData(BaseEstimator, TransformerMixin):
             scaler = StandardScaler()
         elif self.scaler_type == 'minmax':
             scaler = MinMaxScaler()
+        elif self.scaler_type == 'none':
+            return X  # Return the DataFrame without scaling
         else:
             raise ValueError("Invalid scaler_type. Expected 'standard' or 'minmax'.")   # Raise an error if scaler_type is invalid
         scaled_columns = scaler.fit_transform(X[columns_to_scale])
         scaled_df = pd.DataFrame(scaled_columns, columns=columns_to_scale, index=X.index)
         X[columns_to_scale] = scaled_df
+        print("Data scaled successfully.")
         return X
-
-# class PreprocessCombinedDataframe(BaseEstimator, TransformerMixin):
-#     def fit(self, X, y=None):
-#         return self
-
-#     def transform(self, X):
-#         X = X.drop(['participantId', 'selfreport_time'], axis=1)
-#         X.rename(columns={"accel_time": "datetime"}, inplace=True)
-#         X['datetime'] = pd.DatetimeIndex(X["datetime"]).astype(np.int64) / 1000000  # Convert to Unix time in seconds
-#         print("Data preprocessed successfully.")
-#         return X
 
 class ExtractFeatures(BaseEstimator, TransformerMixin):
     def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False):
@@ -182,7 +195,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
 
         for report_id in X['reportId'].unique():
             temp = X[X['reportId'] == report_id]                            # takes all rows with the same reportId
-            temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed  
+            temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed #TIPS: acceltime can be removed 
             windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
             for window in windows:
                 features = self._extract_features_from_window(window)       # extracts features from each window
@@ -191,21 +204,26 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
                 features['valence'] = temp['valence'].iloc[0]               
                 features['context'] = temp['context'].iloc[0]               # adds context to the features
                 features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
+                features["combined"] = temp["combined"].iloc[0]             # adds combined to the features
                 features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
 
         all_features = pd.concat(features_list, ignore_index=True)
 
         # Export features to CSV
-        window_length_str = str(self.window_length)
+        window_length_str = str(self.window_length)                 # Naming the file
         window_step_size_str = str(self.window_step_size)
-        file_name = f"features_window_{window_length_str}_step_{window_step_size_str}.csv"
+        if self.selected_domains is None:                           # All features calculated if domains are not selected
+            domain_str = "all_features"
+        else:
+            domain_str = "_".join(self.selected_domains)
+        file_name = f"features_window_{window_length_str}_step_{window_step_size_str}_{domain_str}.csv"
         all_features.to_csv(file_name, index=False)
 
         print("All features extracted successfully.")
         return all_features
 
-    def _window_data(self, data):
-        window_samples = int(self.window_length * self.data_frequency)                                              # Number of samples in each window
+    def _window_data(self, data):                                                            # Function to create windows of the data
+        window_samples = int(self.window_length * self.data_frequency)                       # Number of samples in each window 60sec * 25Hz = 1500 samples
         step_samples = int(self.window_step_size * self.data_frequency)                                             # Number of samples to move the window
         windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]      # Create windows
         return np.array(windows)
@@ -219,11 +237,21 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         if self.selected_domains is None or 'spatial' in self.selected_domains:
             all_features.update(self._extract_spatial_features(window))
         
-        # Add other domains (frequency, statistical, wavelet) as needed
+        if self.selected_domains is None or 'frequency' in self.selected_domains:
+            all_features.update(self._extract_frequency_domain_features(window))
+
+        if self.selected_domains is None or 'statistical' in self.selected_domains:
+            all_features.update(self._extract_statistical_features(window))
+
+        if self.selected_domains is None or 'wavelet' in self.selected_domains:
+            all_features.update(self._extract_wavelet_features(window))
 
         return all_features
 
     # Time Domain Features
+    def _calculate_magnitude(self, window):
+        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+
     def _extract_time_domain_features(self, window):
         features = {
             'mean_x': np.mean(window[:, 0]),
@@ -256,11 +284,11 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             'zero_crossing_rate_x': np.sum(np.diff(np.sign(window[:, 0])) != 0),
             'zero_crossing_rate_y': np.sum(np.diff(np.sign(window[:, 1])) != 0),
             'zero_crossing_rate_z': np.sum(np.diff(np.sign(window[:, 2])) != 0),
+            'sma' : np.sum(np.abs(window[:, 0])) + np.sum(np.abs(window[:, 1])) + np.sum(np.abs(window[:, 2])), #Signal Magnitude Area
         }
+        print(f"Time domain features extracted successfully.")
 
-        # Signal Magnitude Area (SMA)
-        features['sma'] = np.sum(np.abs(window[:, 0])) + np.sum(np.abs(window[:, 1])) + np.sum(np.abs(window[:, 2]))
-
+        # Additional features for Magnitude (xyz in one vector)
         if self.include_magnitude:
             magnitude = self._calculate_magnitude(window)
             features['mean_magnitude'] = np.mean(magnitude)
@@ -273,6 +301,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             features['skewness_magnitude'] = pd.Series(magnitude).skew()
             features['kurtosis_magnitude'] = pd.Series(magnitude).kurt()
             features['zero_crossing_rate_magnitude'] = np.sum(np.diff(np.sign(magnitude)) != 0)
+            print(f"Additional time domain features for magnitude extracted successfully.")
 
         return features
 
@@ -295,10 +324,10 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         features['correlation_xz'] = np.corrcoef(window[:, 0], window[:, 2])[0, 1]
         features['correlation_yz'] = np.corrcoef(window[:, 1], window[:, 2])[0, 1]
 
+        print(f"Spatial features extracted successfully.")
         return features
 
-    def _calculate_magnitude(self, window):
-        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+
 
     # Frequency Domain Features
     def _extract_frequency_domain_features(self, window):
@@ -368,6 +397,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             # Spectral Centroid for Magnitude
             features['spectral_centroid_magnitude'] = np.sum(f * psd_values_mag) / np.sum(psd_values_mag)
 
+        print(f"Frequency domain features extracted successfully.")
         return features
 
 
@@ -386,6 +416,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             features['25th_percentile_magnitude'] = np.percentile(magnitude, 25)
             features['75th_percentile_magnitude'] = np.percentile(magnitude, 75)
         
+        print(f"Statistical features extracted successfully.")
         return features
 
     def _extract_wavelet_features(self, window, wavelet='db1'):
@@ -401,10 +432,8 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             coeffs_magnitude = pywt.wavedec(magnitude, wavelet, level=3)
             features['wavelet_energy_approx_magnitude'] = np.sum(coeffs_magnitude[0]**2)
         
+        print(f"Wavelet features extracted successfully.")
         return features
-
-    def _calculate_magnitude(self, window):
-        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
 
 class PCAHandler(BaseEstimator, TransformerMixin):
     def __init__(self, apply_pca=False, variance=0.95):
@@ -422,50 +451,50 @@ class PCAHandler(BaseEstimator, TransformerMixin):
         if self.apply_pca and self.pca:
             X_transformed = self.pca.transform(X)
             return pd.DataFrame(X_transformed, index=X.index)
+        
         return X
-        
-class FeatureSelectionAndEncoding(BaseEstimator, TransformerMixin):
-    def __init__(self, target="arousal_valence"): # Target column to encode #TODO No arousal_valence column has been made yet - add it to the combined dataframe
-        self.target = target
-        self.label_encoder = LabelEncoder()
-
-    def fit(self, X, y=None):
-        self.label_encoder.fit(X[self.target])
-        return self
-
-    def transform(self, X):                                         #TODO renew the encoding system
-        
-        X['target'] = self.label_encoder.transform(X[self.target])
-        return X.drop(columns=[self.target])
-    
 
 class TrainModel(BaseEstimator, TransformerMixin):
-    def __init__(self, config):
+    def __init__(self, config, target="combined"):
         self.config = config
+        self.target = config.get("target", "combined")  # Default to "combined"
+        self.label_encoder = LabelEncoder()
 
     def fit(self, X, y):
-        # Choose classifier
-        if self.config['classifier'] == 'xgboost':
-            model = XGBClassifier(objective='multi:softmax', random_state=42)
-            param_space = {
-                'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
-                'n_estimators': Integer(100, 1000),
-                'max_depth': Integer(3, 10),
-            }
-        elif self.config['classifier'] == 'svm':
-            model = SVC(probability=True)
-            param_space = {
-                'C': Real(0.1, 10, prior='log-uniform'),
-                'kernel': Categorical(['linear', 'rbf']),
-            }
-        elif self.config['classifier'] == 'randomforest':
-            model = RandomForestClassifier(random_state=42)
-            param_space = {
-                'n_estimators': Integer(100, 1000),
-                'max_depth': Integer(3, 10),
-            }
+        # Fit the label encoder on the target column
+        print(f"Encoding the target labels for '{self.target}'...")
+        self.label_encoder.fit(X[self.target])
+        
+        # Print the mapping between original labels and encoded labels
+        original_labels = list(self.label_encoder.classes_)
+        encoded_labels = list(range(len(original_labels)))
+        label_mapping = dict(zip(encoded_labels, original_labels))
+        print(f"Label encoding complete. Mapping: {label_mapping}")
 
-        # Hyperparameter tuning with BayesSearchCV
+        # Transform the target column and add it as 'target'
+        X['target'] = self.label_encoder.transform(X[self.target])
+
+        # Drop the original target column to avoid redundancy
+        X = X.drop(columns=[self.target])
+
+        # Choose classifier                     #TODO check paramspace of 
+        classifier = self.config['classifier']
+        if classifier == 'xgboost':
+            model = XGBClassifier(objective='multi:softmax', random_state=42)
+        elif classifier == 'svm':
+            model = SVC(probability=True)
+        elif classifier == 'randomforest':
+            model = RandomForestClassifier(random_state=42)
+        else:
+            raise ValueError(f"Unsupported classifier type: {classifier}")
+        print(f"Training the model using {self.config['classifier']}...")
+
+        # Use user-defined param_space if provided, otherwise use default
+        default_param_space = self.get_default_param_space(classifier)
+        param_space = self.config.get("param_space", default_param_space)
+
+        
+        # Hyperparameter tuning using Bayesian optimization
         sgkf = StratifiedGroupKFold(n_splits=self.config['n_splits'])
         opt = BayesSearchCV(
             estimator=model,
@@ -478,6 +507,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             scoring='accuracy'
         )
 
+        print("Hyperparameter tuning in progress...")
+
         opt.fit(X.drop(columns=['target']), X['target'])
         self.best_model = opt.best_estimator_
         print(f"Best parameters found: {opt.best_params_}")
@@ -485,10 +516,34 @@ class TrainModel(BaseEstimator, TransformerMixin):
         # Save the best model
         model_name = f"{self.config['classifier']}_best_model_{self.config['model_name']}.pkl"
         joblib.dump(self.best_model, model_name)
+
+        print("Model trained successfully.")
         return self
 
     def transform(self, X):
         return X
+    
+    # Configuration for hyperparameter tuning #TODO Check for paramspaces - which are the best for each model
+    def get_default_param_space(classifier):
+        # Returns the default hyperparameter space for a given classifier.
+        if classifier == 'xgboost':
+            return {
+                'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
+                'n_estimators': Integer(100, 1000),
+                'max_depth': Integer(3, 10)
+            }
+        elif classifier == 'svm':
+            return {
+                'C': Real(0.1, 10, prior='log-uniform'),
+                'kernel': Categorical(['linear', 'rbf'])
+            }
+        elif classifier == 'randomforest':
+            return {
+                'n_estimators': Integer(100, 1000),
+                'max_depth': Integer(3, 10)
+            }
+        else:
+            raise ValueError(f"Unsupported classifier type: {classifier}")
 
 # Full training pipeline including every step
 full_training_pipeline = Pipeline([
@@ -504,13 +559,12 @@ full_training_pipeline = Pipeline([
                                          selected_domains=config["selected_domains"], 
                                          include_magnitude=config["include_magnitude"])),
     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-    ('feature_selection', FeatureSelectionAndEncoding(target="arousal_valence")),
     ('train_model', TrainModel(config=config)),
 ])
 
 # Given Pipeline for combining dataframes
 combining_dataframes_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="path/to/AccelerometerData.csv", reports_path="path/to/SelfReports.csv")),
+    ('import_data', ImportData()),
     ('preprocessing', Preprocessing()),
     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
     ('create_combined_dataframe', CreateCombinedDataFrame()),
@@ -518,22 +572,23 @@ combining_dataframes_pipeline = Pipeline([
 
 # Given model training pipeline
 training_model_pipeline = Pipeline([
+    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     ('extract_features', ExtractFeatures(window_length=config["window_length"], 
                                          window_step_size=config["window_step_size"], 
                                          data_frequency=config["data_frequency"], 
                                          selected_domains=config["selected_domains"], 
                                          include_magnitude=config["include_magnitude"])),
     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-    ('feature_selection', FeatureSelectionAndEncoding(target="arousal_valence")),
     ('train_model', TrainModel(config=config)),
 ])
 
+accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
+reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
+
+# Run combining_dataframes_pipeline
+start_time = time.time()
+combining_dataframes_pipeline.fit_transform((None))
+end_time = time.time()
+print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 
-# # Step 3: Run the pipeline
-# all_features = training_pipeline.fit_transform(None)
-# print("Pipeline executed successfully.")
-
-# # Step 4: Save the output to CSV
-# all_features.to_csv("Manual_60_20_Full.csv", encoding='utf-8', index=False)
-# print("Features saved successfully.")
