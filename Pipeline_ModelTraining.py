@@ -10,7 +10,7 @@ from skopt import BayesSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.externals import joblib
+import joblib
 from skopt.space import Real, Integer, Categorical
 import pywt
 from scipy.fft import fft
@@ -23,6 +23,8 @@ config = {
     # Configuration for default settings
 
     # Configuration for data import
+    # "accel_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv",  # Path to the accelerometer data
+    # "reports_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv",  # Path to the self-reports data
     "time_window": 3,  # Time window in minutes
     "scaler_type": "standard",  # 'standard' or 'minmax'
 
@@ -53,20 +55,40 @@ config = {
 
 # Pipeline Classes
 class ImportData(BaseEstimator, TransformerMixin):
-    def __init__(self, accel_path, reports_path):
+    def __init__(self, accel_path=None, reports_path=None, combined_data_path=None, features_data_path=None):
         self.accel_path = accel_path
         self.reports_path = reports_path
+        self.combined_data_path = combined_data_path
+        self.features_data_path = features_data_path
 
     def fit(self, X, y=None):
         return self
 
     def transform(self, X):
-        raw_acceleration_data = pd.read_csv(self.accel_path)
-        raw_selfreports_data = pd.read_csv(self.reports_path)
-        df_accel = raw_acceleration_data.copy()
-        df_reports = raw_selfreports_data.copy()
-        print("Data imported successfully.")
-        return df_reports, df_accel
+        if self.features_data_path:  # If the path to features data is provided
+            # Load the features dataframe
+            features_df = pd.read_csv(self.features_data_path)
+            print('Features dataframe imported successfully.')
+            return features_df
+
+        elif self.combined_data_path:  # If the path to combined data is provided
+            # Load the combined dataframe
+            combined_df = pd.read_csv(self.combined_data_path)
+            print('Combined dataframe imported successfully.')
+            return combined_df
+
+        else:  # Otherwise, load the raw accelerometer and reports data
+            if not self.accel_path or not self.reports_path:
+                raise ValueError("Both accel_path and reports_path need to be provided if combined_data_path and features_data_path are not given.")
+
+            raw_acceleration_data = pd.read_csv(self.accel_path)
+            raw_selfreports_data = pd.read_csv(self.reports_path)
+
+            df_accel = raw_acceleration_data.copy()
+            df_reports = raw_selfreports_data.copy()
+
+            print('Raw data imported successfully.')
+            return df_reports, df_accel
 
 class Preprocessing(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
@@ -114,6 +136,9 @@ class ExtractAccelData(BaseEstimator, TransformerMixin):
         return accel_data[mask]                                     # Return the filtered rows
 
 class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
+    def __init__(self, time_window):
+        self.time_window = time_window
+
     def fit(self, X, y=None):
         return self
 
@@ -206,7 +231,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
                 features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
                 features["combined"] = temp["combined"].iloc[0]             # adds combined to the features
                 features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
-
+                                                                            #TODO Adding loading bar % of all windows
         all_features = pd.concat(features_list, ignore_index=True)
 
         # Export features to CSV
@@ -286,7 +311,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             'zero_crossing_rate_z': np.sum(np.diff(np.sign(window[:, 2])) != 0),
             'sma' : np.sum(np.abs(window[:, 0])) + np.sum(np.abs(window[:, 1])) + np.sum(np.abs(window[:, 2])), #Signal Magnitude Area
         }
-        print(f"Time domain features extracted successfully.")
+        # print(f"Time domain features extracted successfully.")
 
         # Additional features for Magnitude (xyz in one vector)
         if self.include_magnitude:
@@ -301,7 +326,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             features['skewness_magnitude'] = pd.Series(magnitude).skew()
             features['kurtosis_magnitude'] = pd.Series(magnitude).kurt()
             features['zero_crossing_rate_magnitude'] = np.sum(np.diff(np.sign(magnitude)) != 0)
-            print(f"Additional time domain features for magnitude extracted successfully.")
+            # print(f"Additional time domain features for magnitude extracted successfully.")
 
         return features
 
@@ -324,7 +349,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         features['correlation_xz'] = np.corrcoef(window[:, 0], window[:, 2])[0, 1]
         features['correlation_yz'] = np.corrcoef(window[:, 1], window[:, 2])[0, 1]
 
-        print(f"Spatial features extracted successfully.")
+        # print(f"Spatial features extracted successfully.")
         return features
 
 
@@ -397,7 +422,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             # Spectral Centroid for Magnitude
             features['spectral_centroid_magnitude'] = np.sum(f * psd_values_mag) / np.sum(psd_values_mag)
 
-        print(f"Frequency domain features extracted successfully.")
+        # print(f"Frequency domain features extracted successfully.")
         return features
 
 
@@ -416,7 +441,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             features['25th_percentile_magnitude'] = np.percentile(magnitude, 25)
             features['75th_percentile_magnitude'] = np.percentile(magnitude, 75)
         
-        print(f"Statistical features extracted successfully.")
+        # print(f"Statistical features extracted successfully.")
         return features
 
     def _extract_wavelet_features(self, window, wavelet='db1'):
@@ -432,7 +457,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             coeffs_magnitude = pywt.wavedec(magnitude, wavelet, level=3)
             features['wavelet_energy_approx_magnitude'] = np.sum(coeffs_magnitude[0]**2)
         
-        print(f"Wavelet features extracted successfully.")
+        # print(f"Wavelet features extracted successfully.")
         return features
 
 class PCAHandler(BaseEstimator, TransformerMixin):
@@ -455,82 +480,26 @@ class PCAHandler(BaseEstimator, TransformerMixin):
         return X
 
 class TrainModel(BaseEstimator, TransformerMixin):
-    def __init__(self, config, target="combined"):
+    def __init__(self, config):
         self.config = config
         self.target = config.get("target", "combined")  # Default to "combined"
         self.label_encoder = LabelEncoder()
 
-    def fit(self, X, y):
-        # Fit the label encoder on the target column
-        print(f"Encoding the target labels for '{self.target}'...")
-        self.label_encoder.fit(X[self.target])
-        
-        # Print the mapping between original labels and encoded labels
-        original_labels = list(self.label_encoder.classes_)
-        encoded_labels = list(range(len(original_labels)))
-        label_mapping = dict(zip(encoded_labels, original_labels))
-        print(f"Label encoding complete. Mapping: {label_mapping}")
-
-        # Transform the target column and add it as 'target'
-        X['target'] = self.label_encoder.transform(X[self.target])
-
-        # Drop the original target column to avoid redundancy
-        X = X.drop(columns=[self.target])
-
-        # Choose classifier                     #TODO check paramspace of 
-        classifier = self.config['classifier']
-        if classifier == 'xgboost':
-            model = XGBClassifier(objective='multi:softmax', random_state=42)
-        elif classifier == 'svm':
-            model = SVC(probability=True)
-        elif classifier == 'randomforest':
-            model = RandomForestClassifier(random_state=42)
-        else:
-            raise ValueError(f"Unsupported classifier type: {classifier}")
-        print(f"Training the model using {self.config['classifier']}...")
-
-        # Use user-defined param_space if provided, otherwise use default
-        default_param_space = self.get_default_param_space(classifier)
-        param_space = self.config.get("param_space", default_param_space)
-
-        
-        # Hyperparameter tuning using Bayesian optimization
-        sgkf = StratifiedGroupKFold(n_splits=self.config['n_splits'])
-        opt = BayesSearchCV(
-            estimator=model,
-            search_spaces=param_space,
-            cv=sgkf,
-            n_iter=self.config['n_iter'],
-            n_jobs=self.config['n_jobs'],
-            n_points=self.config['n_points'],
-            verbose=1,
-            scoring='accuracy'
-        )
-
-        print("Hyperparameter tuning in progress...")
-
-        opt.fit(X.drop(columns=['target']), X['target'])
-        self.best_model = opt.best_estimator_
-        print(f"Best parameters found: {opt.best_params_}")
-
-        # Save the best model
-        model_name = f"{self.config['classifier']}_best_model_{self.config['model_name']}.pkl"
-        joblib.dump(self.best_model, model_name)
-
-        print("Model trained successfully.")
-        return self
-
-    def transform(self, X):
-        return X
-    
-    # Configuration for hyperparameter tuning #TODO Check for paramspaces - which are the best for each model
-    def get_default_param_space(classifier):
+    def get_default_param_space(self, classifier):
+        # """
         # Returns the default hyperparameter space for a given classifier.
+        # """
         if classifier == 'xgboost':
             return {
                 'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
                 'n_estimators': Integer(100, 1000),
-                'max_depth': Integer(3, 10)
+                'max_depth': Integer(3, 10),
+                'min_child_weight': (1, 10),
+                'subsample': (0.5, 1.0),
+                'colsample_bytree': (0.5, 1.0),
+                'gamma': (0, 10),
+                'reg_alpha': (0, 10),  # alpha in xgboost is reg_alpha
+                'reg_lambda': (0, 10), # lambda in xgboost is reg_lambda
             }
         elif classifier == 'svm':
             return {
@@ -545,50 +514,146 @@ class TrainModel(BaseEstimator, TransformerMixin):
         else:
             raise ValueError(f"Unsupported classifier type: {classifier}")
 
+    def fit(self, X, y=None):
+        # Fit the label encoder on the target column
+        print(f"Encoding the target labels for '{self.target}'...")
+        self.label_encoder.fit(X[self.target])
+
+        # Print the mapping between original labels and encoded labels
+        original_labels = list(self.label_encoder.classes_)
+        encoded_labels = list(range(len(original_labels)))
+        label_mapping = dict(zip(encoded_labels, original_labels))
+        print(f"Label encoding complete. Mapping: {label_mapping}")
+
+        # Transform the target column and add it as 'encoded_target'
+        X['encoded_target'] = self.label_encoder.transform(X[self.target])
+
+        # Pop everything except the features and the encoded target (reportId,arousal,valence,context,participantId,combined)
+        groups = X.pop('reportId')
+        arousal = X.pop('arousal')
+        valence = X.pop('valence')
+        context = X.pop('context')
+        participantId = X.pop('participantId')
+        combined = X.pop('combined')
+        
+        # pop the encoded target as Y
+        y = X.pop('encoded_target')
+
+        # Choose classifier
+        classifier = self.config['classifier']
+        if classifier == 'xgboost':
+            model = XGBClassifier(objective='multi:softmax', random_state=42)
+        elif classifier == 'svm':
+            model = SVC(probability=True)
+        elif classifier == 'randomforest':
+            model = RandomForestClassifier(random_state=42)
+        else:
+            raise ValueError(f"Unsupported classifier type: {classifier}")
+
+        print(f"Training the model using {classifier}...")
+
+        # Use user-defined param_space if provided, otherwise use default
+        print(f"Classifier: {classifier}")
+        default_param_space = self.get_default_param_space(classifier)
+        # Use user-defined param_space if provided, otherwise use default
+        param_space = self.config.get("param_space") or default_param_space     
+
+        # Hyperparameter tuning using Bayesian optimization
+        sgkf = StratifiedGroupKFold(n_splits=self.config['n_splits'])
+        print(f"Parameter space being used: {param_space}")
+        if param_space is None:
+            raise ValueError("Parameter space cannot be None. Please check the classifier configuration.")
+
+        opt = BayesSearchCV(
+            estimator=model,
+            search_spaces=param_space,
+            cv=sgkf,
+            n_iter=self.config['n_iter'],
+            n_jobs=self.config['n_jobs'],
+            n_points=self.config['n_points'],
+            verbose=1,
+            scoring='accuracy'
+        )
+
+        print("Hyperparameter tuning in progress...")
+
+        # Fit the model using the encoded target
+        opt.fit(X, y, groups=groups)
+        self.best_model = opt.best_estimator_
+        print(f"Best parameters found: {opt.best_params_}")
+
+        # Save the best model
+        model_name = f"{classifier}_best_model_{self.target}.pkl"
+        joblib.dump(self.best_model, model_name)
+
+        #TODO print metrics and feature importance
+
+        print("Model trained successfully.")
+        return self
+
+    def transform(self, X):
+        return X  # Placeholder for transform step (not needed for training)
+
+
 # Full training pipeline including every step
-full_training_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="path/to/AccelerometerData.csv", reports_path="path/to/SelfReports.csv")),
-    ('preprocessing', Preprocessing()),
-    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-    ('create_combined_dataframe', CreateCombinedDataFrame()),
-    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-    # ('preprocess_combined_dataframe', PreprocessCombinedDataframe()),
-    ('extract_features', ExtractFeatures(window_length=config["window_length"], 
-                                         window_step_size=config["window_step_size"], 
-                                         data_frequency=config["data_frequency"], 
-                                         selected_domains=config["selected_domains"], 
-                                         include_magnitude=config["include_magnitude"])),
-    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-    ('train_model', TrainModel(config=config)),
-])
+# full_training_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="path/to/AccelerometerData.csv", reports_path="path/to/SelfReports.csv")),
+#     ('preprocessing', Preprocessing()),
+#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+#     ('create_combined_dataframe', CreateCombinedDataFrame()),
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+#     # ('preprocess_combined_dataframe', PreprocessCombinedDataframe()),
+#     ('extract_features', ExtractFeatures(window_length=config["window_length"], 
+#                                          window_step_size=config["window_step_size"], 
+#                                          data_frequency=config["data_frequency"], 
+#                                          selected_domains=config["selected_domains"], 
+#                                          include_magnitude=config["include_magnitude"])),
+#     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
+#     ('train_model', TrainModel(config=config)),
+# ])
 
 # Given Pipeline for combining dataframes
-combining_dataframes_pipeline = Pipeline([
-    ('import_data', ImportData()),
-    ('preprocessing', Preprocessing()),
-    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-    ('create_combined_dataframe', CreateCombinedDataFrame()),
-])
+# First pipeline part (takes raw dataframes as input)
+# combining_dataframes_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+#                                reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+#     ('preprocessing', Preprocessing()),
+#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
+# ])
 
-# Given model training pipeline
+# # Feature extraction pipeline part (takes combined dataframe as input)
+# feature_extraction_pipeline = Pipeline([
+#     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+#     ('extract_features', ExtractFeatures(window_length=config["window_length"],
+#                                          window_step_size=config["window_step_size"],
+#                                          data_frequency=config["data_frequency"],
+#                                          selected_domains=config["selected_domains"],
+#                                          include_magnitude=config["include_magnitude"])),
+# ])
+
+# Training model pipeline part (takes features dataframe as input)
 training_model_pipeline = Pipeline([
-    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-    ('extract_features', ExtractFeatures(window_length=config["window_length"], 
-                                         window_step_size=config["window_step_size"], 
-                                         data_frequency=config["data_frequency"], 
-                                         selected_domains=config["selected_domains"], 
-                                         include_magnitude=config["include_magnitude"])),
+    ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
     ('train_model', TrainModel(config=config)),
 ])
 
-accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
-reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
+# accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
+# reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
+# combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# Run combining_dataframes_pipeline
+# # Run combining_dataframes_pipeline
+# start_time = time.time()
+# combining_dataframes_pipeline.fit_transform((None))
+# end_time = time.time()
+# print(f"Time taken: {end_time - start_time:.2f} seconds")
+
+# Run training_model_pipeline
 start_time = time.time()
-combining_dataframes_pipeline.fit_transform((None))
+training_model_pipeline.fit_transform(None)
 end_time = time.time()
-print(f"Time taken: {end_time - start_time:.2f} seconds")
+print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 
 
