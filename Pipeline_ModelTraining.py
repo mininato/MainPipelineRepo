@@ -15,6 +15,8 @@ from skopt.space import Real, Integer, Categorical
 import pywt
 from scipy.fft import fft
 from scipy.signal import welch
+from sklearn.metrics import classification_report, accuracy_score
+import json
 
 
 
@@ -145,7 +147,7 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
     def transform(self, X):
         combined_data = []
 
-        for _, row in X.iterrows():
+        for _, row in X.iterrows():                                 #FIXME Very slow, need to optimize -> Future Work
             accel_data = row['accel_data']
             for _, accel_row in accel_data.iterrows():
                 combined_data.append({
@@ -528,6 +530,10 @@ class TrainModel(BaseEstimator, TransformerMixin):
         # Transform the target column and add it as 'encoded_target'
         X['encoded_target'] = self.label_encoder.transform(X[self.target])
 
+        # Value counts for the encoded target        
+        value_counts = X['encoded_target'].value_counts().to_dict()
+        print(f"Value counts for encoded target: {value_counts}")
+        
         # Pop everything except the features and the encoded target (reportId,arousal,valence,context,participantId,combined)
         groups = X.pop('reportId')
         arousal = X.pop('arousal')
@@ -538,6 +544,9 @@ class TrainModel(BaseEstimator, TransformerMixin):
         
         # pop the encoded target as Y
         y = X.pop('encoded_target')
+
+        # Store the feature names for later use
+        feature_names = X.columns.tolist()
 
         # Choose classifier
         classifier = self.config['classifier']
@@ -582,13 +591,47 @@ class TrainModel(BaseEstimator, TransformerMixin):
         self.best_model = opt.best_estimator_
         print(f"Best parameters found: {opt.best_params_}")
 
+        #TODO print metrics and feature importance
+        # Print classification metrics
+        y_pred = self.best_model.predict(X)
+        accuracy = accuracy_score(y, y_pred)
+        report = classification_report(y, y_pred, target_names=self.label_encoder.classes_, output_dict=True)
+        classification_report_json = report.to_dict()
+        print(f"Accuracy: {accuracy}")
+        print(f"Classification Report:\n{report}")
+
+        # Saving Part
         # Save the best model
         model_name = f"{classifier}_best_model_{self.target}.pkl"
         joblib.dump(self.best_model, model_name)
+        print("Model saved successfully.")
 
-        #TODO print metrics and feature importance
+        # Save metrics and feature importance
+        model_metadata = {
+            "best_params": opt.best_params_,
+            "accuracy": accuracy,
+            "classification_report": classification_report_json,
+            "label_mapping": label_mapping,
+            "model_name": model_name,
+            "value_counts": value_counts      
+            }
 
-        print("Model trained successfully.")
+        if hasattr(self.best_model, "feature_importances_"):
+            feature_importances = self.best_model.feature_importances_
+            # Convert feature importances to native Python floats
+            feature_importance_dict = {feature: float(importance) for feature, importance in zip(feature_names, feature_importances)}
+            model_metadata["feature_importances"] = feature_importance_dict
+            print("Feature Importances:")
+            for feature, importance in feature_importance_dict.items():
+                print(f"{feature}: {importance:.4f}")
+
+
+        metadata_file = f"{classifier}_model_metadata_{self.target}.json"
+
+        with open(metadata_file, "w") as f:
+            json.dump(model_metadata, f, indent=4)
+            print(f"Model metadata saved to {metadata_file}.")
+
         return self
 
     def transform(self, X):
@@ -614,13 +657,13 @@ class TrainModel(BaseEstimator, TransformerMixin):
 
 # Given Pipeline for combining dataframes
 # First pipeline part (takes raw dataframes as input)
-# combining_dataframes_pipeline = Pipeline([
-#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-#                                reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
-#     ('preprocessing', Preprocessing()),
-#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
-# ])
+combining_dataframes_pipeline = Pipeline([
+    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+                               reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+    ('preprocessing', Preprocessing()),
+    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+    ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
+])
 
 # # Feature extraction pipeline part (takes combined dataframe as input)
 # feature_extraction_pipeline = Pipeline([
@@ -633,12 +676,12 @@ class TrainModel(BaseEstimator, TransformerMixin):
 #                                          include_magnitude=config["include_magnitude"])),
 # ])
 
-# Training model pipeline part (takes features dataframe as input)
-training_model_pipeline = Pipeline([
-    ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
-    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-    ('train_model', TrainModel(config=config)),
-])
+# # Training model pipeline part (takes features dataframe as input)
+# training_model_pipeline = Pipeline([
+#     ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
+#     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
+#     ('train_model', TrainModel(config=config)),
+# ])
 
 # accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
@@ -652,7 +695,7 @@ training_model_pipeline = Pipeline([
 
 # Run training_model_pipeline
 start_time = time.time()
-training_model_pipeline.fit_transform(None)
+combining_dataframes_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 

@@ -136,9 +136,6 @@ class PreprocessData(BaseEstimator, TransformerMixin):
         print("Data preprocessed successfully.")
         return X
 
-import numpy as np
-import pandas as pd
-
 class ExtractFeatures(BaseEstimator, TransformerMixin):
     def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False):
         self.window_length = window_length
