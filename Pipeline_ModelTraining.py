@@ -136,6 +136,9 @@ class PreprocessingAccelData(BaseEstimator, TransformerMixin):
         # Create a new column for groupid
         df_accel['groupid'] = (df_accel.index // bin_size_samples) + 1
         print("Groupid created successfully.")
+        # Rename timestamp column to accel_time
+        df_accel.rename(columns={'timestamp': 'accel_time'}, inplace=True)
+        
 
         return df_accel
 
@@ -244,23 +247,28 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
+        # Store the original columns in X
+        original_columns = X.columns
+
         features_list = []
 
         for groupid in X['groupid'].unique():
-            temp = X[X['groupid'] == groupid]                            # takes all rows with the same groupid
-            temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed #TIPS: acceltime can be removed 
-            windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
+            temp = X[X['groupid'] == groupid]  # takes all rows with the same groupid
+            temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()  # takes only the columns needed #TIPS: acceltime can be removed
+            windows = self._window_data(temp_ex[['x', 'y', 'z']])  # creates windows of the data
             for window in windows:
-                features = self._extract_features_from_window(window)       # extracts features from each window
-                features['groupid'] = groupid                            # adds groupid to the features
-                features['arousal'] = temp['arousal'].iloc[0]               # adds arousal and valence to the features
-                features['valence'] = temp['valence'].iloc[0]               
-                features['context'] = temp['context'].iloc[0]               # adds context to the features
-                features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
-                features["combined"] = temp["combined"].iloc[0]             # adds combined to the features
-                features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
-                                                                            #TODO Adding loading bar % of all windows
-        all_features = pd.concat(features_list, ignore_index=True)
+                features = self._extract_features_from_window(window)  # extracts features from each window
+                features['groupid'] = groupid  # adds groupid to the features
+
+                # Add back any original columns if they are present in the original data
+                for col in ['arousal', 'valence', 'context', 'participantId', 'combined']:
+                    if col in original_columns:
+                        features[col] = temp[col].iloc[0]
+
+                features_list.append(pd.DataFrame([features]))  # Convert dictionary to DataFrame
+
+        all_features = pd.concat(features_list, ignore_index=True)      # Concatenate all DataFrames into one DataFrame #Fixme: Test for FeatureExtractionPipeline
+
 
         # Export features to CSV
         window_length_str = str(self.window_length)                 # Naming the file
@@ -691,10 +699,11 @@ class TrainModel(BaseEstimator, TransformerMixin):
 #     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
 # ])
 
-# # Feature extraction pipeline part (takes combined dataframe as input)
+# Feature extraction pipeline part (takes combined dataframe as input)
 # feature_extraction_pipeline = Pipeline([
 #     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
 #     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+    
 #     ('extract_features', ExtractFeatures(window_length=config["window_length"],
 #                                          window_step_size=config["window_step_size"],
 #                                          data_frequency=config["data_frequency"],
@@ -719,6 +728,7 @@ user_pipeline = Pipeline([
     ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+    #TODO: Add ModeltrainingStep
 ])
 
 # Run training_model_pipeline
