@@ -27,8 +27,9 @@ config = {
     # Configuration for data import
     # "accel_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv",  # Path to the accelerometer data
     # "reports_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv",  # Path to the self-reports data
-    "time_window": 3,  # Time window in minutes
+    "time_window": 2,  # Time window in minutes
     "scaler_type": "standard",  # 'standard' or 'minmax'
+    "bin_size_minutes": 3,  # Bin size in minutes
 
     # Configuration for feature extraction
     "window_length": 60,  # Window length in seconds
@@ -80,19 +81,25 @@ class ImportData(BaseEstimator, TransformerMixin):
             return combined_df
 
         else:  # Otherwise, load the raw accelerometer and reports data
-            if not self.accel_path or not self.reports_path:
-                raise ValueError("Both accel_path and reports_path need to be provided if combined_data_path and features_data_path are not given.")
-
+            if not self.accel_path:
+                raise ValueError("accel_path needs to be provided if combined_data_path and features_data_path are not given.")
+            
+            # Load accelerometer data
             raw_acceleration_data = pd.read_csv(self.accel_path)
-            raw_selfreports_data = pd.read_csv(self.reports_path)
-
             df_accel = raw_acceleration_data.copy()
-            df_reports = raw_selfreports_data.copy()
 
-            print('Raw data imported successfully.')
-            return df_reports, df_accel
+            if self.reports_path:
+                # Load self-reports data if provided
+                raw_selfreports_data = pd.read_csv(self.reports_path)
+                df_reports = raw_selfreports_data.copy()
+                print('Raw data (accelerometer and self-reports) imported successfully.')
+                return df_reports, df_accel
+            else:
+                # Only accelerometer data provided
+                print('Raw accelerometer data imported successfully.')
+                return df_accel
 
-class Preprocessing(BaseEstimator, TransformerMixin):
+class PreprocessingCombined(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         return self
 
@@ -112,6 +119,25 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         df_reports["timeOfNotification"] = pd.to_datetime(df_reports["timeOfNotification"], unit="ms")
     
         return df_reports, df_accel
+
+class PreprocessingAccelData(BaseEstimator, TransformerMixin):
+    def __init__(self, bin_size_minutes=3):
+        self.bin_size_minutes = bin_size_minutes
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        df_accel = X
+
+        # Calculate the bin size in terms of the number of samples
+        bin_size_samples = self.bin_size_minutes * 60 * config["data_frequency"]
+
+        # Create a new column for groupid
+        df_accel['groupid'] = (df_accel.index // bin_size_samples) + 1
+        print("Groupid created successfully.")
+
+        return df_accel
 
 class ExtractAccelData(BaseEstimator, TransformerMixin):
     def __init__(self, time_window):
@@ -164,16 +190,16 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
 
         combined_df = pd.DataFrame(combined_data)
 
-        # Create reportId
-        combined_df['reportId'] = combined_df.groupby(['participantId', 'selfreport_time']).ngroup() + 1    # Create unique reportId
-        col = combined_df.pop("reportId")                                                                   # Move reportId to the first column
+        # Create groupid
+        combined_df['groupid'] = combined_df.groupby(['participantId', 'selfreport_time']).ngroup() + 1    # Create unique groupid
+        col = combined_df.pop("groupid")                                                                   # Move groupid to the first column
         combined_df.insert(0, col.name, col)
 
         # Create arousal_valence column
         combined_df['combined'] = combined_df['arousal'].astype(str) + "_" + combined_df['valence'].astype(str)
 
         # Drop rows with missing values
-        combined_df.dropna(subset=['arousal', 'valence', 'reportId', 'combined'], inplace=True)
+        combined_df.dropna(subset=['arousal', 'valence', 'groupid', 'combined'], inplace=True)
 
         # Export combined dataframe to CSV
         time_window_str = str(self.time_window)
@@ -220,13 +246,13 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
     def transform(self, X):
         features_list = []
 
-        for report_id in X['reportId'].unique():
-            temp = X[X['reportId'] == report_id]                            # takes all rows with the same reportId
+        for groupid in X['groupid'].unique():
+            temp = X[X['groupid'] == groupid]                            # takes all rows with the same groupid
             temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed #TIPS: acceltime can be removed 
             windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
             for window in windows:
                 features = self._extract_features_from_window(window)       # extracts features from each window
-                features['reportId'] = report_id                            # adds reportId to the features
+                features['groupid'] = groupid                            # adds groupid to the features
                 features['arousal'] = temp['arousal'].iloc[0]               # adds arousal and valence to the features
                 features['valence'] = temp['valence'].iloc[0]               
                 features['context'] = temp['context'].iloc[0]               # adds context to the features
@@ -534,8 +560,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
         value_counts = X['encoded_target'].value_counts().to_dict()
         print(f"Value counts for encoded target: {value_counts}")
         
-        # Pop everything except the features and the encoded target (reportId,arousal,valence,context,participantId,combined)
-        groups = X.pop('reportId')
+        # Pop everything except the features and the encoded target (groupid,arousal,valence,context,participantId,combined)
+        groups = X.pop('groupid')
         arousal = X.pop('arousal')
         valence = X.pop('valence')
         context = X.pop('context')
@@ -657,13 +683,13 @@ class TrainModel(BaseEstimator, TransformerMixin):
 
 # Given Pipeline for combining dataframes
 # First pipeline part (takes raw dataframes as input)
-combining_dataframes_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-                               reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
-    ('preprocessing', Preprocessing()),
-    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-    ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
-])
+# combining_dataframes_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+#                                reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+#     ('preprocessing', PreprocessingCombined()),
+#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
+# ])
 
 # # Feature extraction pipeline part (takes combined dataframe as input)
 # feature_extraction_pipeline = Pipeline([
@@ -687,16 +713,22 @@ combining_dataframes_pipeline = Pipeline([
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# # Run combining_dataframes_pipeline
-# start_time = time.time()
-# combining_dataframes_pipeline.fit_transform((None))
-# end_time = time.time()
-# print(f"Time taken: {end_time - start_time:.2f} seconds")
+# Test user Pipeline
+user_pipeline = Pipeline([
+    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant.csv")), # input path to accelerometer data)
+    ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
+    ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
+                                          selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+])
 
 # Run training_model_pipeline
 start_time = time.time()
-combining_dataframes_pipeline.fit_transform(None)
+output_df = user_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
+
+output_file = "user_pipeline_output.csv"
+output_df.to_csv(output_file, index=False)
+print(f"User pipeline output exported successfully to {output_file}.")
 
 
