@@ -267,7 +267,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
 
                 features_list.append(pd.DataFrame([features]))  # Convert dictionary to DataFrame
 
-        all_features = pd.concat(features_list, ignore_index=True)      # Concatenate all DataFrames into one DataFrame #Fixme: Test for FeatureExtractionPipeline
+        all_features = pd.concat(features_list, ignore_index=True)      # Concatenate all DataFrames into one DataFrame #DONE: Test for FeatureExtractionPipeline
 
 
         # Export features to CSV
@@ -625,7 +625,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
         self.best_model = opt.best_estimator_
         print(f"Best parameters found: {opt.best_params_}")
 
-        #TODO print metrics and feature importance
+        #DONE print metrics and feature importance
         # Print classification metrics
         y_pred = self.best_model.predict(X)
         accuracy = accuracy_score(y, y_pred)
@@ -671,6 +671,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return X  # Placeholder for transform step (not needed for training)
 
+# class UseModel
 
 # Full training pipeline including every step
 # full_training_pipeline = Pipeline([
@@ -700,16 +701,16 @@ class TrainModel(BaseEstimator, TransformerMixin):
 # ])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
-# feature_extraction_pipeline = Pipeline([
-#     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
-#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+feature_extraction_pipeline = Pipeline([
+    ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
+    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     
-#     ('extract_features', ExtractFeatures(window_length=config["window_length"],
-#                                          window_step_size=config["window_step_size"],
-#                                          data_frequency=config["data_frequency"],
-#                                          selected_domains=config["selected_domains"],
-#                                          include_magnitude=config["include_magnitude"])),
-# ])
+    ('extract_features', ExtractFeatures(window_length=config["window_length"],
+                                         window_step_size=config["window_step_size"],
+                                         data_frequency=config["data_frequency"],
+                                         selected_domains=config["selected_domains"],
+                                         include_magnitude=config["include_magnitude"])),
+])
 
 # # Training model pipeline part (takes features dataframe as input)
 # training_model_pipeline = Pipeline([
@@ -722,23 +723,24 @@ class TrainModel(BaseEstimator, TransformerMixin):
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# Test user Pipeline
-user_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant.csv")), # input path to accelerometer data)
-    ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
-    ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
-                                          selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
-    #TODO: Add ModeltrainingStep
-])
+# # Test user Pipeline
+# user_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant.csv")), # input path to accelerometer data)
+#     ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+#     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
+#                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+#     #TODO: Add ModeltrainingStep
+# ])
 
 # Run training_model_pipeline
 start_time = time.time()
-output_df = user_pipeline.fit_transform(None)
+output_df = feature_extraction_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 
-output_file = "user_pipeline_output.csv"
-output_df.to_csv(output_file, index=False)
-print(f"User pipeline output exported successfully to {output_file}.")
+# output_file = "user_pipeline_output.csv"
+# output_df.to_csv(output_file, index=False)
+# print(f"User pipeline output exported successfully to {output_file}.")
 
 
