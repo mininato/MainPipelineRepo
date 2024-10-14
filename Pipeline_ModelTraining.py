@@ -32,10 +32,10 @@ config = {
     "bin_size_minutes": 3,  # Bin size in minutes
 
     # Configuration for feature extraction
-    "window_length": 60,  # Window length in seconds
-    "window_step_size": 20,  # Step size in seconds / 10%-50% of window_length
+    "window_length": 120,  # Window length in seconds / 60
+    "window_step_size": 120,  # Step size in seconds / 10%-50% of window_length / 20
     "data_frequency": 25,  # Data frequency in Hz
-    "selected_domains": None,  # Default: Every domain / 'time_domain', 'spatial', 'frequency', 'statistical', 'wavelet'
+    "selected_domains": None,  # Default: Every domain / 'time_domain', 'spatial', 'frequency', 'statistical', 'wavelet' / multiple domains: ["time_domain", "frequency"] / order is not important
     "include_magnitude": True,  # Include magnitude-based features or not
 
     # Configuration for PCA
@@ -281,7 +281,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]      # Create windows
         return np.array(windows)
 
-    def _extract_features_from_window(self, window):
+    def _extract_features_from_window(self, window):                        #DONE Mehrere domains gleichzeitig berechnen
         all_features = {}
 
         if self.selected_domains is None or 'time_domain' in self.selected_domains:
@@ -512,6 +512,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
         self.config = config
         self.target = config.get("target", "combined")  # Default to "combined"
         self.label_encoder = LabelEncoder()
+        self.selected_domains = self.config.get("selected_domains", "All domains")  # Default to "All domains" if None
 
     def get_default_param_space(self, classifier):
         # """
@@ -622,7 +623,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
         y_pred = self.best_model.predict(X)
         accuracy = accuracy_score(y, y_pred)
         report = classification_report(y, y_pred, target_names=self.label_encoder.classes_, output_dict=True)
-        classification_report_json = report.to_dict()
+        classification_report_json = report.to_dict() #FIXME: AttributeError: 'dict' object has no attribute 'to_dict'
         print(f"Accuracy: {accuracy}")
         print(f"Classification Report:\n{report}")
 
@@ -639,7 +640,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             "classification_report": classification_report_json,
             "label_mapping": label_mapping,
             "model_name": model_name,
-            "value_counts": value_counts      
+            "value_counts": value_counts
+            #TODO Confusion Matrix hinzufügen      
             }
 
         if hasattr(self.best_model, "feature_importances_"):
@@ -663,6 +665,10 @@ class TrainModel(BaseEstimator, TransformerMixin):
     def transform(self, X):
         return X  # Placeholder for transform step (not needed for training)
 
+#TODO Eigene User-individualisierte Labels, Falls user nicht das gleiche Valence_Arousal Model benutzt
+#TODO Ordner erstellen für Klassen, Pro Klasse eine Datei, damit es wie ein Package fungiert, __init__.py erstellen, Oder pro Pipeline Modul eine Datei erstellen = Clean Code
+
+# class UseModel
 
 # Full training pipeline including every step
 # full_training_pipeline = Pipeline([
@@ -691,7 +697,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
 #     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
 # ])
 
-# # Feature extraction pipeline part (takes combined dataframe as input)
+# Feature extraction pipeline part (takes combined dataframe as input)
 # feature_extraction_pipeline = Pipeline([
 #     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
 #     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
@@ -713,13 +719,15 @@ class TrainModel(BaseEstimator, TransformerMixin):
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# Test user Pipeline
-user_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant.csv")), # input path to accelerometer data)
-    ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
-    ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
-                                          selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
-])
+# # Test user Pipeline
+# user_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant.csv")), # input path to accelerometer data)
+#     ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+#     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
+#                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+#     #TODO: Add ModeltrainingStep
+# ])
 
 # Run training_model_pipeline
 start_time = time.time()
