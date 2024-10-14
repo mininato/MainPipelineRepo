@@ -17,7 +17,7 @@ from scipy.fft import fft
 from scipy.signal import welch
 from sklearn.metrics import classification_report, accuracy_score
 import json
-
+#TODO Requirements.txt erstellen - pip install -r requirements.txt
 
 
 # Configuration for default settings
@@ -29,7 +29,7 @@ config = {
     # "reports_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv",  # Path to the self-reports data
     "time_window": 2,  # Time window in minutes
     "scaler_type": "standard",  # 'standard' or 'minmax'
-    "bin_size_minutes": 3,  # Bin size in minutes
+    "bin_size_minutes": 3,  # Bin size in minutes   #TODO bei None einzelne Windows erstellen
 
     # Configuration for feature extraction
     "window_length": 60,  # Window length in seconds
@@ -289,7 +289,7 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]      # Create windows
         return np.array(windows)
 
-    def _extract_features_from_window(self, window):
+    def _extract_features_from_window(self, window):                        #TODO Mehrere domains gleichzeitig berechnen
         all_features = {}
 
         if self.selected_domains is None or 'time_domain' in self.selected_domains:
@@ -630,7 +630,7 @@ class TrainModel(BaseEstimator, TransformerMixin):
         y_pred = self.best_model.predict(X)
         accuracy = accuracy_score(y, y_pred)
         report = classification_report(y, y_pred, target_names=self.label_encoder.classes_, output_dict=True)
-        classification_report_json = report.to_dict()
+        classification_report_json = report.to_dict() #FIXME: AttributeError: 'dict' object has no attribute 'to_dict'
         print(f"Accuracy: {accuracy}")
         print(f"Classification Report:\n{report}")
 
@@ -647,7 +647,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             "classification_report": classification_report_json,
             "label_mapping": label_mapping,
             "model_name": model_name,
-            "value_counts": value_counts      
+            "value_counts": value_counts
+            #TODO Confusion Matrix hinzufügen      
             }
 
         if hasattr(self.best_model, "feature_importances_"):
@@ -670,6 +671,9 @@ class TrainModel(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         return X  # Placeholder for transform step (not needed for training)
+
+#TODO Eigene User-individualisierte Labels, Falls user nicht das gleiche Valence_Arousal Model benutzt
+#TODO Ordner erstellen für Klassen, Pro Klasse eine Datei, damit es wie ein Package fungiert, __init__.py erstellen, Oder pro Pipeline Modul eine Datei erstellen = Clean Code
 
 # class UseModel
 
@@ -701,23 +705,23 @@ class TrainModel(BaseEstimator, TransformerMixin):
 # ])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
-feature_extraction_pipeline = Pipeline([
-    ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
-    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+# feature_extraction_pipeline = Pipeline([
+#     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     
-    ('extract_features', ExtractFeatures(window_length=config["window_length"],
-                                         window_step_size=config["window_step_size"],
-                                         data_frequency=config["data_frequency"],
-                                         selected_domains=config["selected_domains"],
-                                         include_magnitude=config["include_magnitude"])),
-])
-
-# # Training model pipeline part (takes features dataframe as input)
-# training_model_pipeline = Pipeline([
-#     ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
-#     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-#     ('train_model', TrainModel(config=config)),
+#     ('extract_features', ExtractFeatures(window_length=config["window_length"],
+#                                          window_step_size=config["window_step_size"],
+#                                          data_frequency=config["data_frequency"],
+#                                          selected_domains=config["selected_domains"],
+#                                          include_magnitude=config["include_magnitude"])),
 # ])
+
+# Training model pipeline part (takes features dataframe as input)
+training_model_pipeline = Pipeline([
+    ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
+    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
+    ('train_model', TrainModel(config=config)),
+])
 
 # accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
@@ -735,7 +739,7 @@ feature_extraction_pipeline = Pipeline([
 
 # Run training_model_pipeline
 start_time = time.time()
-output_df = feature_extraction_pipeline.fit_transform(None)
+output_df = training_model_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 
