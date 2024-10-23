@@ -34,8 +34,8 @@ config = {
     "bin_size_minutes": 3,  # Bin size in minutes
 
     # Configuration for feature extraction
-    "window_length": 120,  # Window length in seconds / 60
-    "window_step_size": 120,  # Step size in seconds / 10%-50% of window_length / 20
+    "window_length": 60,  # Window length in seconds / 60
+    "window_step_size": 20,  # Step size in seconds / 10%-50% of window_length / 20
     "data_frequency": 25,  # Data frequency in Hz
     "selected_domains": None,  # Default: Every domain / 'time_domain', 'spatial', 'frequency', 'statistical', 'wavelet' / multiple domains: ["time_domain", "frequency"] / order is not important
     "include_magnitude": True,  # Include magnitude-based features or not
@@ -103,7 +103,7 @@ class ImportData(BaseEstimator, TransformerMixin):
 
 class PreprocessingCombined(BaseEstimator, TransformerMixin):
     def __init__(self, label_columns):
-        self.label_columns = label_columns
+        self.label_columns =label_columns
 
     def fit(self, X, y=None):
         return self
@@ -172,11 +172,13 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
     def __init__(self, time_window, label_columns=None):
         self.time_window = time_window
         self.label_columns = label_columns #if label_columns else ["arousal", "valence"]  # Default to arousal and valence if not specified
+        print(f"Initialized with label_columns: {self.label_columns}")
 
     def fit(self, X, y=None):
         return self
 
     def transform(self, X):
+        print(f"Transform called with label_columns: {self.label_columns}")
         combined_data = []
 
         for _, row in X.iterrows():
@@ -193,6 +195,7 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
 
                 # Dynamically add emotion labels to the combined row
                 for label in self.label_columns:
+                    print(f"Processing label: {label}")
                     combined_row[label] = row[label]
 
                 combined_data.append(combined_row)
@@ -290,6 +293,32 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
     # Time Domain Features
     def _calculate_magnitude(self, window):
         return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+    
+    def _window_data(self, data):                                                            # Function to create windows of the data
+        window_samples = int(self.window_length * self.data_frequency)                       # Number of samples in each window 60sec * 25Hz = 1500 samples
+        step_samples = int(self.window_step_size * self.data_frequency)                                             # Number of samples to move the window
+        windows = [data[i:i + window_samples] for i in range(0, len(data) - window_samples + 1, step_samples)]      # Create windows
+        return np.array(windows)
+
+    def _extract_features_from_window(self, window):                        #DONE Mehrere domains gleichzeitig berechnen
+        all_features = {}
+
+        if self.selected_domains is None or 'time_domain' in self.selected_domains:
+            all_features.update(self._extract_time_domain_features(window))
+        
+        if self.selected_domains is None or 'spatial' in self.selected_domains:
+            all_features.update(self._extract_spatial_features(window))
+        
+        if self.selected_domains is None or 'frequency' in self.selected_domains:
+            all_features.update(self._extract_frequency_domain_features(window))
+
+        if self.selected_domains is None or 'statistical' in self.selected_domains:
+            all_features.update(self._extract_statistical_features(window))
+
+        if self.selected_domains is None or 'wavelet' in self.selected_domains:
+            all_features.update(self._extract_wavelet_features(window))
+
+        return all_features
 
     def _extract_time_domain_features(self, window):
         features = {
@@ -554,6 +583,9 @@ class TrainModel(BaseEstimator, TransformerMixin):
         
         # Pop unnecessary columns (groupid, emotion labels not being used, etc.)
         groups = X.pop('groupid')
+        # Pop the label columns which aren't used
+        for label in self.config["label_columns"]:
+                X.pop(label)
 
         # Pop the encoded target as Y
         y = X.pop('encoded_target')
@@ -597,6 +629,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
         )
 
         print("Hyperparameter tuning in progress...")
+        print(X.describe(),X.columns)
+        print(f"stop")
 
         # Fit the model using the encoded target
         opt.fit(X, y, groups=groups)
@@ -708,53 +742,54 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
 # Given Pipeline for combining dataframes
 # First pipeline part (takes raw dataframes as input)
 # combining_dataframes_pipeline = Pipeline([
-#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-#                                reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
-#     ('preprocessing', PreprocessingCombined()),
+#     ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+#                                reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+#     ('preprocessing', PreprocessingCombined(label_columns=config["label_columns"])),
 #     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
+#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
 # ])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
 # feature_extraction_pipeline = Pipeline([
-#     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
+#     ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
 #     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
 #     ('extract_features', ExtractFeatures(window_length=config["window_length"],
 #                                          window_step_size=config["window_step_size"],
 #                                          data_frequency=config["data_frequency"],
 #                                          selected_domains=config["selected_domains"],
-#                                          include_magnitude=config["include_magnitude"])),
+#                                          include_magnitude=config["include_magnitude"],
+#                                          label_columns=config["label_columns"])),
 # ])
 
 # # Training model pipeline part (takes features dataframe as input)
-# training_model_pipeline = Pipeline([
-#     ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
-#     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-#     ('train_model', TrainModel(config=config)),
-# ])
+training_model_pipeline = Pipeline([
+    ('import_data', ImportData(features_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
+    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
+    ('train_model', TrainModel(config=config)),
+])
 
 # accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# Test user Pipeline
-user_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
-    # ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
-    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-    ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
-                                          selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
-    ('classify_movement_data', ClassifyMovementData(model_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_combined.pkl")),
-])
+# # Test user Pipeline
+# user_pipeline = Pipeline([
+#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
+#     # ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
+#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+#     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
+#                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+#     ('classify_movement_data', ClassifyMovementData(model_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_combined.pkl")),
+# ])
 
 # Run training_model_pipeline
 start_time = time.time()
-output_df = user_pipeline.fit_transform(None)
+output_df = training_model_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 
-output_file = "user_pipeline_output.csv"
-output_df.to_csv(output_file, index=False)
-print(f"User pipeline output exported successfully to {output_file}.")
+# output_file = "user_pipeline_output.csv"
+# output_df.to_csv(output_file, index=False)
+# print(f"User pipeline output exported successfully to {output_file}.")
 
 
