@@ -741,25 +741,25 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
 
 # Given Pipeline for combining dataframes
 # First pipeline part (takes raw dataframes as input)
-# combining_dataframes_pipeline = Pipeline([
-#     ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-#                                reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
-#     ('preprocessing', PreprocessingCombined(label_columns=config["label_columns"])),
-#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
-# ])
+combining_dataframes_pipeline = Pipeline([
+    ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+                               reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+    ('preprocessing', PreprocessingCombined(label_columns=config["label_columns"])),
+    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+    ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
+])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
-# feature_extraction_pipeline = Pipeline([
-#     ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
-#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-#     ('extract_features', ExtractFeatures(window_length=config["window_length"],
-#                                          window_step_size=config["window_step_size"],
-#                                          data_frequency=config["data_frequency"],
-#                                          selected_domains=config["selected_domains"],
-#                                          include_magnitude=config["include_magnitude"],
-#                                          label_columns=config["label_columns"])),
-# ])
+feature_extraction_pipeline = Pipeline([
+    ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
+    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+    ('extract_features', ExtractFeatures(window_length=config["window_length"],
+                                         window_step_size=config["window_step_size"],
+                                         data_frequency=config["data_frequency"],
+                                         selected_domains=config["selected_domains"],
+                                         include_magnitude=config["include_magnitude"],
+                                         label_columns=config["label_columns"])),
+])
 
 # # Training model pipeline part (takes features dataframe as input)
 training_model_pipeline = Pipeline([
@@ -773,14 +773,14 @@ training_model_pipeline = Pipeline([
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
 # # Test user Pipeline
-# user_pipeline = Pipeline([
-#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
-#     # ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
-#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-#     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
-#                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
-#     ('classify_movement_data', ClassifyMovementData(model_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_combined.pkl")),
-# ])
+user_pipeline = Pipeline([
+    ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
+    # ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
+    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+    ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
+                                          selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
+    ('classify_movement_data', ClassifyMovementData(model_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_combined.pkl")),
+])
 
 # Run training_model_pipeline
 start_time = time.time()
