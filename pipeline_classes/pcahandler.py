@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.decomposition import PCA
 from _config import config
-
+    
 class PCAHandler(BaseEstimator, TransformerMixin):
     def __init__(self, apply_pca=False, variance=0.95):
         self.apply_pca = apply_pca

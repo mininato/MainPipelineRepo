@@ -23,6 +23,8 @@ import json
 # Configuration for default settings
 config = {
     # Configuration for default settings
+    "label_columns": ["valence", "arousal"],  # Columns for target labels
+    "target_label": "arousal",  # Target label for training
 
     # Configuration for data import
     # "accel_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv",  # Path to the accelerometer data
@@ -32,8 +34,8 @@ config = {
     "bin_size_minutes": 3,  # Bin size in minutes
 
     # Configuration for feature extraction
-    "window_length": 120,  # Window length in seconds / 60
-    "window_step_size": 120,  # Step size in seconds / 10%-50% of window_length / 20
+    "window_length": 60,  # Window length in seconds / 60
+    "window_step_size": 20,  # Step size in seconds / 10%-50% of window_length / 20
     "data_frequency": 25,  # Data frequency in Hz
     "selected_domains": None,  # Default: Every domain / 'time_domain', 'spatial', 'frequency', 'statistical', 'wavelet' / multiple domains: ["time_domain", "frequency"] / order is not important
     "include_magnitude": True,  # Include magnitude-based features or not
@@ -100,24 +102,27 @@ class ImportData(BaseEstimator, TransformerMixin):
                 return df_accel
 
 class PreprocessingCombined(BaseEstimator, TransformerMixin):
+    def __init__(self, label_columns):
+        self.label_columns =label_columns
+
     def fit(self, X, y=None):
         return self
 
     def transform(self, X):
         df_reports, df_accel = X
 
-        valid_conditions = (
-            (df_reports['timeOfEngagement'] != 0) &     # Filter out rows with missing values
-            (df_reports['valence'] != "NONE") &         # Filter out rows with 'NONE' values
-            (df_reports['arousal'] != "NONE") &         # Filter out rows with 'NONE' values
-            (df_reports['context'] != "NONE")           # Filter out rows with 'NONE' values
-        )
+        # Ensure the chosen label columns exist in the dataset
+        valid_conditions = (df_reports['timeOfEngagement'] != 0) 
+        for label in self.label_columns:
+            valid_conditions &= (df_reports[label] != "NONE")
+        
         df_reports = df_reports[valid_conditions].copy()
 
+        # Renaming and datetime conversion remains the same
         df_accel.rename(columns={'timestamp': 'timeOfNotification'}, inplace=True)
         df_accel["timeOfNotification"] = pd.to_datetime(df_accel["timeOfNotification"], unit="ms")
         df_reports["timeOfNotification"] = pd.to_datetime(df_reports["timeOfNotification"], unit="ms")
-    
+
         return df_reports, df_accel
 
 class PreprocessingAccelData(BaseEstimator, TransformerMixin):
@@ -164,49 +169,50 @@ class ExtractAccelData(BaseEstimator, TransformerMixin):
         return accel_data[mask]                                     # Return the filtered rows
 
 class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
-    def __init__(self, time_window):
+    def __init__(self, time_window, label_columns=None):
         self.time_window = time_window
+        self.label_columns = label_columns #if label_columns else ["arousal", "valence"]  # Default to arousal and valence if not specified
+        print(f"Initialized with label_columns: {self.label_columns}")
 
     def fit(self, X, y=None):
         return self
 
     def transform(self, X):
+        print(f"Transform called with label_columns: {self.label_columns}")
         combined_data = []
 
-        for _, row in X.iterrows():                                 #FIXME Very slow, need to optimize -> Future Work
+        for _, row in X.iterrows():
             accel_data = row['accel_data']
             for _, accel_row in accel_data.iterrows():
-                combined_data.append({
-                    'participantId': row['participantId'],          # Add participantId to the combined data
-                    'selfreport_time': row['timeOfNotification'],   # Add selfreport_time to the combined data
-                    'valence': row['valence'],                      # Add valence to the combined data
-                    'arousal': row['arousal'],                      # Add arousal to the combined data
-                    'context': row['context'],                      # Add context to the combined data
-                    'accel_time': accel_row['timeOfNotification'],  # Add accel_time to the combined data
-                    'x': accel_row['x'],                            # Add x, y, z to the combined data
-                    'y': accel_row['y'],
-                    'z': accel_row['z']
-                })
+                combined_row = {
+                    'participantId': row['participantId'],  # Participant ID
+                    'selfreport_time': row['timeOfNotification'],  # Self-report time
+                    'accel_time': accel_row['timeOfNotification'],  # Accelerometer data time
+                    'x': accel_row['x'],  # x-axis accelerometer data
+                    'y': accel_row['y'],  # y-axis accelerometer data
+                    'z': accel_row['z']   # z-axis accelerometer data
+                }
+
+                # Dynamically add emotion labels to the combined row
+                for label in self.label_columns:
+                    print(f"Processing label: {label}")
+                    combined_row[label] = row[label]
+
+                combined_data.append(combined_row)
 
         combined_df = pd.DataFrame(combined_data)
 
-        # Create groupid
-        combined_df['groupid'] = combined_df.groupby(['participantId', 'selfreport_time']).ngroup() + 1    # Create unique groupid
-        col = combined_df.pop("groupid")                                                                   # Move groupid to the first column
+        # Create groupid column (unique identifier based on participantId and selfreport_time)
+        combined_df['groupid'] = combined_df.groupby(['participantId', 'selfreport_time']).ngroup() + 1
+        col = combined_df.pop("groupid")  # Move groupid to the first column
         combined_df.insert(0, col.name, col)
 
-        # Create arousal_valence column
-        combined_df['combined'] = combined_df['arousal'].astype(str) + "_" + combined_df['valence'].astype(str)
-
-        # Drop rows with missing values
-        combined_df.dropna(subset=['arousal', 'valence', 'groupid', 'combined'], inplace=True)
-
-        # Export combined dataframe to CSV
+        # Export the combined dataframe to CSV
         time_window_str = str(self.time_window)
         file_name = f"combined_data_timewindow_{time_window_str}min.csv"
         combined_df.to_csv(file_name, index=False)
         print(f"Combined dataframe exported successfully to {file_name}.")
-        
+
         return combined_df
 
 class ScaleXYZData(BaseEstimator, TransformerMixin):
@@ -233,12 +239,13 @@ class ScaleXYZData(BaseEstimator, TransformerMixin):
         return X
 
 class ExtractFeatures(BaseEstimator, TransformerMixin):
-    def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False):
+    def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False, label_columns=None):
         self.window_length = window_length
         self.window_step_size = window_step_size
         self.data_frequency = data_frequency
         self.selected_domains = selected_domains
         self.include_magnitude = include_magnitude
+        self.label_columns = label_columns #if label_columns else ["arousal", "valence"]  # Default to arousal and valence if not specified
 
     def fit(self, X, y=None):
         return self
@@ -246,22 +253,23 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
     def transform(self, X):
         features_list = []
 
-        if 'groupid' in X.columns:  #TODO: Testen ob mit groupid immer noch funktioniert
-            for groupid in X['groupid'].unique():           #Only do this when there is a column with groupid, otherwise calculate features the same but only with accel_time, x, y, z
-                temp = X[X['groupid'] == groupid]                            # takes all rows with the same groupid
-                temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed #TIPS: acceltime can be removed 
-                windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
+        if 'groupid' in X.columns:  # Check for groupid column
+            for groupid in X['groupid'].unique():  # Iterate over unique group IDs
+                temp = X[X['groupid'] == groupid]  # Filter rows by group ID
+                temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()  # Keep only the necessary columns (accel_time can be removed if unused)
+                windows = self._window_data(temp_ex[['x', 'y', 'z']])  # Create windows of data
+                
                 for window in windows:
-                    features = self._extract_features_from_window(window)       # extracts features from each window
-                    features['groupid'] = groupid                            # adds groupid to the features
-                    features['arousal'] = temp['arousal'].iloc[0]               # adds arousal and valence to the features
-                    features['valence'] = temp['valence'].iloc[0]               
-                    features['context'] = temp['context'].iloc[0]               # adds context to the features
-                    features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
-                    features["combined"] = temp["combined"].iloc[0]             # adds combined to the features
-                    features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
-                                                                            #TODO Adding loading bar % of all windows
-        else:
+                    features = self._extract_features_from_window(window)  # Extract features from each window
+                    features['groupid'] = groupid  # Add groupid to the features
+                    
+                    # Dynamically add emotion labels to the features
+                    for label in self.label_columns:
+                        features[label] = temp[label].iloc[0]
+                    
+                    features_list.append(pd.DataFrame([features]))  # Convert dictionary to DataFrame
+                    
+        else:  # In case there's no groupid, calculate features without it
             windows = self._window_data(X[['x', 'y', 'z']])
             for window in windows:
                 features = self._extract_features_from_window(window)
@@ -270,9 +278,9 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         all_features = pd.concat(features_list, ignore_index=True)
 
         # Export features to CSV
-        window_length_str = str(self.window_length)                 # Naming the file
+        window_length_str = str(self.window_length)
         window_step_size_str = str(self.window_step_size)
-        if self.selected_domains is None:                           # All features calculated if domains are not selected
+        if self.selected_domains is None:  # All features calculated if domains are not selected
             domain_str = "all_features"
         else:
             domain_str = "_".join(self.selected_domains)
@@ -282,6 +290,10 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         print("All features extracted successfully.")
         return all_features
 
+    # Time Domain Features
+    def _calculate_magnitude(self, window):
+        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+    
     def _window_data(self, data):                                                            # Function to create windows of the data
         window_samples = int(self.window_length * self.data_frequency)                       # Number of samples in each window 60sec * 25Hz = 1500 samples
         step_samples = int(self.window_step_size * self.data_frequency)                                             # Number of samples to move the window
@@ -307,10 +319,6 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             all_features.update(self._extract_wavelet_features(window))
 
         return all_features
-
-    # Time Domain Features
-    def _calculate_magnitude(self, window):
-        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
 
     def _extract_time_domain_features(self, window):
         features = {
@@ -517,14 +525,15 @@ class PCAHandler(BaseEstimator, TransformerMixin):
 class TrainModel(BaseEstimator, TransformerMixin):
     def __init__(self, config):
         self.config = config
-        self.target = config.get("target", "combined")  # Default to "combined"
+        self.target = config.get("target_label", None)  # User-defined target label in config
         self.label_encoder = LabelEncoder()
-        self.selected_domains = self.config.get("selected_domains", "All domains")  # Default to "All domains" if None
+        self.selected_domains = self.config.get("selected_domains", "All domains")  # Default to all domains if None
+
+        if not self.target:
+            raise ValueError("No target label specified in the config. Please set 'target_label'.")
 
     def get_default_param_space(self, classifier):
-        # """
-        # Returns the default hyperparameter space for a given classifier.
-        # """
+        """ Returns the default hyperparameter space for a given classifier. """
         if classifier == 'xgboost':
             return {
                 'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
@@ -534,8 +543,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
                 'subsample': (0.5, 1.0),
                 'colsample_bytree': (0.5, 1.0),
                 'gamma': (0, 10),
-                'reg_alpha': (0, 10),  # alpha in xgboost is reg_alpha
-                'reg_lambda': (0, 10), # lambda in xgboost is reg_lambda
+                'reg_alpha': (0, 10),
+                'reg_lambda': (0, 10),
             }
         elif classifier == 'svm':
             return {
@@ -551,6 +560,10 @@ class TrainModel(BaseEstimator, TransformerMixin):
             raise ValueError(f"Unsupported classifier type: {classifier}")
 
     def fit(self, X, y=None):
+        # Ensure the target column exists in the dataset
+        if self.target not in X.columns:
+            raise ValueError(f"Target label '{self.target}' not found in the dataset.")
+        
         # Fit the label encoder on the target column
         print(f"Encoding the target labels for '{self.target}'...")
         self.label_encoder.fit(X[self.target])
@@ -568,15 +581,13 @@ class TrainModel(BaseEstimator, TransformerMixin):
         value_counts = X['encoded_target'].value_counts().to_dict()
         print(f"Value counts for encoded target: {value_counts}")
         
-        # Pop everything except the features and the encoded target (groupid,arousal,valence,context,participantId,combined)
+        # Pop unnecessary columns (groupid, emotion labels not being used, etc.)
         groups = X.pop('groupid')
-        arousal = X.pop('arousal')
-        valence = X.pop('valence')
-        context = X.pop('context')
-        participantId = X.pop('participantId')
-        combined = X.pop('combined')
-        
-        # pop the encoded target as Y
+        # Pop the label columns which aren't used
+        for label in self.config["label_columns"]:
+                X.pop(label)
+
+        # Pop the encoded target as Y
         y = X.pop('encoded_target')
 
         # Store the feature names for later use
@@ -598,7 +609,6 @@ class TrainModel(BaseEstimator, TransformerMixin):
         # Use user-defined param_space if provided, otherwise use default
         print(f"Classifier: {classifier}")
         default_param_space = self.get_default_param_space(classifier)
-        # Use user-defined param_space if provided, otherwise use default
         param_space = self.config.get("param_space") or default_param_space     
 
         # Hyperparameter tuning using Bayesian optimization
@@ -619,32 +629,33 @@ class TrainModel(BaseEstimator, TransformerMixin):
         )
 
         print("Hyperparameter tuning in progress...")
+        print(X.describe(),X.columns)
+        print(f"stop")
 
         # Fit the model using the encoded target
         opt.fit(X, y, groups=groups)
         self.best_model = opt.best_estimator_
         print(f"Best parameters found: {opt.best_params_}")
 
-        #DONE print metrics and feature importance
         # Print classification metrics
         y_pred = self.best_model.predict(X)
         accuracy = accuracy_score(y, y_pred)
         report = classification_report(y, y_pred, target_names=self.label_encoder.classes_, output_dict=True)
         
+        # Save classification report
         classification_report_json = report  
-        with open('classification_report.json', 'w') as f:
+        with open(f'classification_report_{self.target}.json', 'w') as f:
             json.dump(classification_report_json, f, indent=4)
 
         print(f"Accuracy: {accuracy}")
         print(f"Classification Report:\n{report}")
 
-        # Saving Part
-        # Save the best model
+        # Save the best model with the target label in the file name
         model_name = f"{classifier}_best_model_{self.target}.pkl"
         joblib.dump(self.best_model, model_name)
         print("Model saved successfully.")
 
-        # Save metrics and feature importance
+        # Save model metadata
         model_metadata = {
             "best_params": opt.best_params_,
             "accuracy": accuracy,
@@ -653,9 +664,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             "model_name": model_name,
             "value_counts": value_counts,
             "selected_domains": self.selected_domains,  
-            "include_magnitude": self.config.get("include_magnitude", True)  
-            #TODO Confusion Matrix hinzufügen      
-            }
+            "include_magnitude": self.config.get("include_magnitude", True)      
+        }
 
         if hasattr(self.best_model, "feature_importances_"):
             feature_importances = self.best_model.feature_importances_
@@ -666,9 +676,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             for feature, importance in feature_importance_dict.items():
                 print(f"{feature}: {importance:.4f}")
 
-
+        # Save metadata with the target name in the file name
         metadata_file = f"{classifier}_model_metadata_{self.target}.json"
-
         with open(metadata_file, "w") as f:
             json.dump(model_metadata, f, indent=4)
             print(f"Model metadata saved to {metadata_file}.")
@@ -708,6 +717,7 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
         return X
 
 #TODO Eigene User-individualisierte Labels, Falls user nicht das gleiche Valence_Arousal Model benutzt
+#TODO Test ob individualisierte Labels funktionieren
 #TODO Ordner erstellen für Klassen, Pro Klasse eine Datei, damit es wie ein Package fungiert, __init__.py erstellen, Oder pro Pipeline Modul eine Datei erstellen = Clean Code
 
 # class UseModel
@@ -731,37 +741,38 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
 
 # Given Pipeline for combining dataframes
 # First pipeline part (takes raw dataframes as input)
-# combining_dataframes_pipeline = Pipeline([
-#     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-#                                reports_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
-#     ('preprocessing', PreprocessingCombined()),
-#     ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
-#     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"])),
-# ])
+combining_dataframes_pipeline = Pipeline([
+    ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
+                               reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+    ('preprocessing', PreprocessingCombined(label_columns=config["label_columns"])),
+    ('extract_accel_data', ExtractAccelData(time_window=config["time_window"])),
+    ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
+])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
-# feature_extraction_pipeline = Pipeline([
-#     ('import_data', ImportData(combined_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv")), # input path to combined data
-#     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
-#     ('extract_features', ExtractFeatures(window_length=config["window_length"],
-#                                          window_step_size=config["window_step_size"],
-#                                          data_frequency=config["data_frequency"],
-#                                          selected_domains=config["selected_domains"],
-#                                          include_magnitude=config["include_magnitude"])),
-# ])
+feature_extraction_pipeline = Pipeline([
+    ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min.csv")), # input path to combined data
+    ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
+    ('extract_features', ExtractFeatures(window_length=config["window_length"],
+                                         window_step_size=config["window_step_size"],
+                                         data_frequency=config["data_frequency"],
+                                         selected_domains=config["selected_domains"],
+                                         include_magnitude=config["include_magnitude"],
+                                         label_columns=config["label_columns"])),
+])
 
 # # Training model pipeline part (takes features dataframe as input)
-# training_model_pipeline = Pipeline([
-#     ('import_data', ImportData(features_data_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
-#     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
-#     ('train_model', TrainModel(config=config)),
-# ])
+training_model_pipeline = Pipeline([
+    ('import_data', ImportData(features_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
+    ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
+    ('train_model', TrainModel(config=config)),
+])
 
 # accel_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv"
 # reports_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv"
 # combined_data_path = "C:/Users/duong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_3min.csv"
 
-# Test user Pipeline
+# # Test user Pipeline
 user_pipeline = Pipeline([
     ('import_data', ImportData(accel_path="C:/Users/duong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
     # ('preprocessing', PreprocessingAccelData(bin_size_minutes=config["bin_size_minutes"])),
@@ -773,12 +784,12 @@ user_pipeline = Pipeline([
 
 # Run training_model_pipeline
 start_time = time.time()
-output_df = user_pipeline.fit_transform(None)
+output_df = training_model_pipeline.fit_transform(None)
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
 
-output_file = "user_pipeline_output.csv"
-output_df.to_csv(output_file, index=False)
-print(f"User pipeline output exported successfully to {output_file}.")
+# output_file = "user_pipeline_output.csv"
+# output_df.to_csv(output_file, index=False)
+# print(f"User pipeline output exported successfully to {output_file}.")
 
 

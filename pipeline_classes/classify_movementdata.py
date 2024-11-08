@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.externals import joblib
 from _config import config
-
+ 
 class ClassifyMovementData(BaseEstimator, TransformerMixin):
     def __init__(self, model_path):
         self.model_path = model_path
