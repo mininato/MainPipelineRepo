@@ -7,12 +7,13 @@ import pywt
 from _config import config
 
 class ExtractFeatures(BaseEstimator, TransformerMixin):
-    def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False):
+    def __init__(self, window_length, window_step_size, data_frequency, selected_domains=None, include_magnitude=False, label_columns=None):
         self.window_length = window_length
         self.window_step_size = window_step_size
         self.data_frequency = data_frequency
         self.selected_domains = selected_domains
         self.include_magnitude = include_magnitude
+        self.label_columns = label_columns #if label_columns else ["arousal", "valence"]  # Default to arousal and valence if not specified
 
     def fit(self, X, y=None):
         return self
@@ -20,22 +21,23 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
     def transform(self, X):
         features_list = []
 
-        if 'groupid' in X.columns:  #TODO: Testen ob mit groupid immer noch funktioniert
-            for groupid in X['groupid'].unique():           #Only do this when there is a column with groupid, otherwise calculate features the same but only with accel_time, x, y, z
-                temp = X[X['groupid'] == groupid]                            # takes all rows with the same groupid
-                temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()            # takes only the columns needed #TIPS: acceltime can be removed 
-                windows = self._window_data(temp_ex[['x', 'y', 'z']])           # creates windows of the data
+        if 'groupid' in X.columns:  # Check for groupid column
+            for groupid in X['groupid'].unique():  # Iterate over unique group IDs
+                temp = X[X['groupid'] == groupid]  # Filter rows by group ID
+                temp_ex = temp[['accel_time', 'x', 'y', 'z']].copy()  # Keep only the necessary columns (accel_time can be removed if unused)
+                windows = self._window_data(temp_ex[['x', 'y', 'z']])  # Create windows of data
+                
                 for window in windows:
-                    features = self._extract_features_from_window(window)       # extracts features from each window
-                    features['groupid'] = groupid                            # adds groupid to the features
-                    features['arousal'] = temp['arousal'].iloc[0]               # adds arousal and valence to the features
-                    features['valence'] = temp['valence'].iloc[0]               
-                    features['context'] = temp['context'].iloc[0]               # adds context to the features
-                    features['participantId'] = temp['participantId'].iloc[0]   # adds participantId to the features
-                    features["combined"] = temp["combined"].iloc[0]             # adds combined to the features
-                    features_list.append(pd.DataFrame([features]))              # Convert dictionary to DataFrame
-                                                                            #TODO Adding loading bar % of all windows
-        else:
+                    features = self._extract_features_from_window(window)  # Extract features from each window
+                    features['groupid'] = groupid  # Add groupid to the features
+                    
+                    # Dynamically add emotion labels to the features
+                    for label in self.label_columns:
+                        features[label] = temp[label].iloc[0]
+                    
+                    features_list.append(pd.DataFrame([features]))  # Convert dictionary to DataFrame
+                    
+        else:  # In case there's no groupid, calculate features without it
             windows = self._window_data(X[['x', 'y', 'z']])
             for window in windows:
                 features = self._extract_features_from_window(window)
@@ -44,9 +46,9 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         all_features = pd.concat(features_list, ignore_index=True)
 
         # Export features to CSV
-        window_length_str = str(self.window_length)                 # Naming the file
+        window_length_str = str(self.window_length)
         window_step_size_str = str(self.window_step_size)
-        if self.selected_domains is None:                           # All features calculated if domains are not selected
+        if self.selected_domains is None:  # All features calculated if domains are not selected
             domain_str = "all_features"
         else:
             domain_str = "_".join(self.selected_domains)
@@ -56,6 +58,10 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
         print("All features extracted successfully.")
         return all_features
 
+    # Time Domain Features
+    def _calculate_magnitude(self, window):
+        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
+    
     def _window_data(self, data):                                                            # Function to create windows of the data
         window_samples = int(self.window_length * self.data_frequency)                       # Number of samples in each window 60sec * 25Hz = 1500 samples
         step_samples = int(self.window_step_size * self.data_frequency)                                             # Number of samples to move the window
@@ -81,10 +87,6 @@ class ExtractFeatures(BaseEstimator, TransformerMixin):
             all_features.update(self._extract_wavelet_features(window))
 
         return all_features
-
-    # Time Domain Features
-    def _calculate_magnitude(self, window):
-        return np.sqrt(window[:, 0]**2 + window[:, 1]**2 + window[:, 2]**2)
 
     def _extract_time_domain_features(self, window):
         features = {

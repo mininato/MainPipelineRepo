@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from _config import config
-
+    
 class PreprocessingAccelData(BaseEstimator, TransformerMixin):
     def __init__(self, bin_size_minutes=3):
         self.bin_size_minutes = bin_size_minutes

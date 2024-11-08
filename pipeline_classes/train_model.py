@@ -11,19 +11,20 @@ from skopt.space import Real, Integer, Categorical
 from sklearn.metrics import classification_report, accuracy_score
 import json
 from sklearn.preprocessing import LabelEncoder
-from _config import config
+from _config import config   
 
 class TrainModel(BaseEstimator, TransformerMixin):
     def __init__(self, config):
         self.config = config
-        self.target = config.get("target", "combined")  # Default to "combined"
+        self.target = config.get("target_label", None)  # User-defined target label in config
         self.label_encoder = LabelEncoder()
-        self.selected_domains = self.config.get("selected_domains", "All domains")  # Default to "All domains" if None
+        self.selected_domains = self.config.get("selected_domains", "All domains")  # Default to all domains if None
+
+        if not self.target:
+            raise ValueError("No target label specified in the config. Please set 'target_label'.")
 
     def get_default_param_space(self, classifier):
-        # """
-        # Returns the default hyperparameter space for a given classifier.
-        # """
+        """ Returns the default hyperparameter space for a given classifier. """
         if classifier == 'xgboost':
             return {
                 'learning_rate': Real(0.01, 0.3, prior='log-uniform'),
@@ -33,8 +34,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
                 'subsample': (0.5, 1.0),
                 'colsample_bytree': (0.5, 1.0),
                 'gamma': (0, 10),
-                'reg_alpha': (0, 10),  # alpha in xgboost is reg_alpha
-                'reg_lambda': (0, 10), # lambda in xgboost is reg_lambda
+                'reg_alpha': (0, 10),
+                'reg_lambda': (0, 10),
             }
         elif classifier == 'svm':
             return {
@@ -50,6 +51,10 @@ class TrainModel(BaseEstimator, TransformerMixin):
             raise ValueError(f"Unsupported classifier type: {classifier}")
 
     def fit(self, X, y=None):
+        # Ensure the target column exists in the dataset
+        if self.target not in X.columns:
+            raise ValueError(f"Target label '{self.target}' not found in the dataset.")
+        
         # Fit the label encoder on the target column
         print(f"Encoding the target labels for '{self.target}'...")
         self.label_encoder.fit(X[self.target])
@@ -67,15 +72,13 @@ class TrainModel(BaseEstimator, TransformerMixin):
         value_counts = X['encoded_target'].value_counts().to_dict()
         print(f"Value counts for encoded target: {value_counts}")
         
-        # Pop everything except the features and the encoded target (groupid,arousal,valence,context,participantId,combined)
+        # Pop unnecessary columns (groupid, emotion labels not being used, etc.)
         groups = X.pop('groupid')
-        arousal = X.pop('arousal')
-        valence = X.pop('valence')
-        context = X.pop('context')
-        participantId = X.pop('participantId')
-        combined = X.pop('combined')
-        
-        # pop the encoded target as Y
+        # Pop the label columns which aren't used
+        for label in self.config["label_columns"]:
+                X.pop(label)
+
+        # Pop the encoded target as Y
         y = X.pop('encoded_target')
 
         # Store the feature names for later use
@@ -97,7 +100,6 @@ class TrainModel(BaseEstimator, TransformerMixin):
         # Use user-defined param_space if provided, otherwise use default
         print(f"Classifier: {classifier}")
         default_param_space = self.get_default_param_space(classifier)
-        # Use user-defined param_space if provided, otherwise use default
         param_space = self.config.get("param_space") or default_param_space     
 
         # Hyperparameter tuning using Bayesian optimization
@@ -118,32 +120,33 @@ class TrainModel(BaseEstimator, TransformerMixin):
         )
 
         print("Hyperparameter tuning in progress...")
+        print(X.describe(),X.columns)
+        print(f"stop")
 
         # Fit the model using the encoded target
         opt.fit(X, y, groups=groups)
         self.best_model = opt.best_estimator_
         print(f"Best parameters found: {opt.best_params_}")
 
-        #DONE print metrics and feature importance
         # Print classification metrics
         y_pred = self.best_model.predict(X)
         accuracy = accuracy_score(y, y_pred)
         report = classification_report(y, y_pred, target_names=self.label_encoder.classes_, output_dict=True)
         
+        # Save classification report
         classification_report_json = report  
-        with open('classification_report.json', 'w') as f:
+        with open(f'classification_report_{self.target}.json', 'w') as f:
             json.dump(classification_report_json, f, indent=4)
 
         print(f"Accuracy: {accuracy}")
         print(f"Classification Report:\n{report}")
 
-        # Saving Part
-        # Save the best model
+        # Save the best model with the target label in the file name
         model_name = f"{classifier}_best_model_{self.target}.pkl"
         joblib.dump(self.best_model, model_name)
         print("Model saved successfully.")
 
-        # Save metrics and feature importance
+        # Save model metadata
         model_metadata = {
             "best_params": opt.best_params_,
             "accuracy": accuracy,
@@ -152,9 +155,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             "model_name": model_name,
             "value_counts": value_counts,
             "selected_domains": self.selected_domains,  
-            "include_magnitude": self.config.get("include_magnitude", True)  
-            #TODO Confusion Matrix hinzufügen      
-            }
+            "include_magnitude": self.config.get("include_magnitude", True)      
+        }
 
         if hasattr(self.best_model, "feature_importances_"):
             feature_importances = self.best_model.feature_importances_
@@ -165,9 +167,8 @@ class TrainModel(BaseEstimator, TransformerMixin):
             for feature, importance in feature_importance_dict.items():
                 print(f"{feature}: {importance:.4f}")
 
-
+        # Save metadata with the target name in the file name
         metadata_file = f"{classifier}_model_metadata_{self.target}.json"
-
         with open(metadata_file, "w") as f:
             json.dump(model_metadata, f, indent=4)
             print(f"Model metadata saved to {metadata_file}.")
