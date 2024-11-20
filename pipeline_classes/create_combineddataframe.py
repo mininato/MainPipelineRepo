@@ -11,12 +11,32 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         return self
-
+    
     def transform(self, X):
-        print(f"Transform called with label_columns: {self.label_columns}")
+        df_reports, df_accel = X
+
+        print(f"PreprocesssingCombined initialized with label_columns: {self.label_columns}")
+        # Ensure the chosen label columns exist in the dataset
+        valid_conditions = (df_reports['timeOfEngagement'] != 0) 
+        for label in self.label_columns:
+            valid_conditions &= (df_reports[label] != "NONE")
+        
+        df_reports = df_reports[valid_conditions].copy()
+
+        # Renaming and datetime conversion remains the same
+        df_accel.rename(columns={'timestamp': 'timeOfNotification'}, inplace=True)
+        df_accel["timeOfNotification"] = pd.to_datetime(df_accel["timeOfNotification"], unit="ms")
+        df_reports["timeOfNotification"] = pd.to_datetime(df_reports["timeOfNotification"], unit="ms")
+
+        print(f"ExtractAccelData initialized with time_window: {self.time_window}")
+        df_reports, df_accel = X
+        df_reports['accel_data'] = df_reports.apply(lambda row: self._extract_accel_data(row, df_accel), axis=1)
+    
+        print(f"Combining called with label_columns: {self.label_columns}")
         combined_data = []
 
-        for _, row in X.iterrows():
+
+        for _, row in df_reports.iterrows():
             accel_data = row['accel_data']
             for _, accel_row in accel_data.iterrows():
                 combined_row = {
@@ -44,8 +64,21 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
 
         # Export the combined dataframe to CSV
         time_window_str = str(self.time_window)
-        file_name = f"combined_data_timewindow_{time_window_str}min.csv"
+        label_columns_str = "_".join(self.label_columns)
+        file_name = f"combined_data_timewindow_{time_window_str}min_labels_{label_columns_str}.csv"
         combined_df.to_csv(file_name, index=False)
         print(f"Combined dataframe exported successfully to {file_name}.")
 
         return combined_df
+    
+    def _extract_accel_data(self, row, accel_data):
+        time_delta = pd.Timedelta(minutes=self.time_window)         
+        start_time = pd.to_datetime(row['timeOfNotification']) - time_delta
+        end_time = pd.to_datetime(row['timeOfNotification']) + time_delta
+        participant_id = row['participantId']
+        mask = (
+            (accel_data['participantId'] == participant_id) &       # Filter out rows with different participantId
+            (accel_data['timeOfNotification'] >= start_time) &      # Filter out rows with time outside the window
+            (accel_data['timeOfNotification'] <= end_time)          # Filter out rows with time outside the window
+        )
+        return accel_data[mask] 
