@@ -7,7 +7,6 @@ class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
     def __init__(self, time_window, label_columns=None):
         self.time_window = time_window
         self.label_columns = label_columns #if label_columns else ["arousal", "valence"]  # Default to arousal and valence if not specified
-        print(f"Initialized with label_columns: {self.label_columns}")
 
     def fit(self, X, y=None):
         return self

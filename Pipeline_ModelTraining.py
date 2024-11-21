@@ -42,7 +42,7 @@ config = {
     "include_magnitude": True,  # Include magnitude-based features or not
 
     #Configuration for Low-pass filter
-    "cutoff_frequency": 5,  # Cut-off frequency for the low-pass filter
+    "cutoff_frequency": 10,  # Cut-off frequency for the low-pass filter
     "order": 4,  # Order of the filter
 
     # Configuration for PCA
@@ -60,7 +60,17 @@ config = {
     "n_points": 1,
 
     # If users want to define custom param_space, they can specify it here
-    "param_space": None,  # Set to None to use default inside the TrainModel class
+    "param_space": {
+        "learning_rate": (0.05, 0.2), 
+        "n_estimators": (200, 800),
+        "max_depth": (4, 8),
+        "min_child_weight": (1, 5),
+        "subsample": (0.6, 0.9),
+        "colsample_bytree": (0.6, 0.9),
+        "gamma": (0, 5),
+        "reg_alpha": (0, 5),
+        "reg_lambda": (0, 5)
+    },  # Set to None to use default inside the TrainModel class
 }
 
 # Pipeline Classes
@@ -105,89 +115,6 @@ class ImportData(BaseEstimator, TransformerMixin):
                 # Only accelerometer data provided
                 print('Raw accelerometer data imported successfully.')
                 return df_accel
-
-class PreprocessingCombined(BaseEstimator, TransformerMixin):
-    def __init__(self, label_columns):
-        self.label_columns =label_columns
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        df_reports, df_accel = X
-
-        # Ensure the chosen label columns exist in the dataset
-        valid_conditions = (df_reports['timeOfEngagement'] != 0) 
-        for label in self.label_columns:
-            valid_conditions &= (df_reports[label] != "NONE")
-        
-        df_reports = df_reports[valid_conditions].copy()
-
-        # Renaming and datetime conversion remains the same
-        df_accel.rename(columns={'timestamp': 'timeOfNotification'}, inplace=True)
-        df_accel["timeOfNotification"] = pd.to_datetime(df_accel["timeOfNotification"], unit="ms")
-        df_reports["timeOfNotification"] = pd.to_datetime(df_reports["timeOfNotification"], unit="ms")
-
-        return df_reports, df_accel
-
-class PreprocessingAccelData(BaseEstimator, TransformerMixin):
-    def __init__(self, bin_size_minutes=3):
-        self.bin_size_minutes = bin_size_minutes
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        df_accel = X
-
-        # Calculate the bin size in terms of the number of samples
-        bin_size_samples = self.bin_size_minutes * 60 * config["data_frequency"]
-
-        # Create a new column for groupid
-        df_accel['groupid'] = (df_accel.index // bin_size_samples) + 1
-        print("Groupid created successfully.")
-
-        return df_accel
-
-class Preprocessing(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        df_reports, df_accel = X
-
-        # Rename the columns in the accelerometer data
-        df_accel.rename(columns={'timestamp': 'timeOfNotification'}, inplace=True)
-
-        # Convert the time columns to datetime format
-        df_accel["timeOfNotification"] = pd.to_datetime(df_accel["timeOfNotification"], unit="ms")
-        df_reports["timeOfNotification"] = pd.to_datetime(df_reports["timeOfNotification"], unit="ms")
-
-        return df_reports, df_accel
-
-class ExtractAccelData(BaseEstimator, TransformerMixin):
-    def __init__(self, time_window):
-        self.time_window = time_window
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        df_reports, df_accel = X
-        df_reports['accel_data'] = df_reports.apply(lambda row: self._extract_accel_data(row, df_accel), axis=1)
-        return df_reports
-
-    def _extract_accel_data(self, row, accel_data):
-        time_delta = pd.Timedelta(minutes=self.time_window)         
-        start_time = row['timeOfNotification'] - time_delta
-        end_time = row['timeOfNotification'] + time_delta
-        participant_id = row['participantId']
-        mask = (
-            (accel_data['participantId'] == participant_id) &       # Filter out rows with different participantId
-            (accel_data['timeOfNotification'] >= start_time) &      # Filter out rows with time outside the window
-            (accel_data['timeOfNotification'] <= end_time)          # Filter out rows with time outside the window
-        )
-        return accel_data[mask]                                     # Return the filtered rows
 
 class CreateCombinedDataFrame(BaseEstimator, TransformerMixin):
     def __init__(self, time_window, label_columns=None):
@@ -845,14 +772,14 @@ class LowPassFilter(BaseEstimator, TransformerMixin):
 # First pipeline part (takes raw dataframes as input)
 combining_dataframes_pipeline = Pipeline([
     ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv", # input path to accelerometer data
-                               reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv")),            # input path to self-reports data),
+                               reports_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/Cleaned_SelfReports.csv")),            # input path to self-reports data),
     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
-    ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
 ])
 
 # Feature extraction pipeline part (takes combined dataframe as input)
 feature_extraction_pipeline = Pipeline([
-    ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min_labels_valence_arousal_lowpass.csv")), # input path to combined data
+    ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min_labels_valence_arousal.csv")), # input path to combined data
+    ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     ('extract_features', ExtractFeatures(window_length=config["window_length"],
                                          window_step_size=config["window_step_size"],
@@ -864,7 +791,7 @@ feature_extraction_pipeline = Pipeline([
 
 # # Training model pipeline part (takes features dataframe as input)
 training_model_pipeline = Pipeline([
-    ('import_data', ImportData(features_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/filtered_features_window_60_step_20_all_features.csv")),
+    ('import_data', ImportData(features_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
     ('train_model', TrainModel(config=config)),
 ])
