@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.externals import joblib
+import joblib
 from _config import config
- 
+
 class ClassifyMovementData(BaseEstimator, TransformerMixin):
     def __init__(self, model_path):
         self.model_path = model_path
@@ -31,4 +31,4 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
         X.to_csv(output_file, index=False)
         print(f"Classified movement data exported successfully to {output_file}.")
 
-        return X
+        return X 
