@@ -5,7 +5,7 @@ import time
 
 # # Training model pipeline part (takes features dataframe as input)
 training_model_pipeline = Pipeline([
-    ('import_data', ImportData(features_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv")),
+    ('import_data', ImportData(use_accel=False, use_reports=False, use_combined=False, use_features=True)),
     ('pca_handler', PCAHandler(apply_pca=config["apply_pca"], variance=config["pca_variance"])),
     ('train_model', TrainModel(config=config)),
 ])
