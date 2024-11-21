@@ -5,12 +5,12 @@ import time
 
 # # Test user Pipeline
 analyzing_data_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv")), # input path to accelerometer data)
+    ('import_data', ImportData(use_accel=True, use_reports=False, use_combined=False, use_features=False)), # input path to accelerometer data)
     ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     ('extract_features', ExtractFeatures(window_length=config['window_length'], window_step_size=config["window_step_size"], data_frequency=config["data_frequency"],
                                           selected_domains=config['selected_domains'], include_magnitude=config['include_magnitude'])),
-    ('classify_movement_data', ClassifyMovementData(model_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_arousal.pkl")),
+    ('classify_movement_data', ClassifyMovementData()),
 ])
 
 # Run pipeline

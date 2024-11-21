@@ -1,19 +1,18 @@
 # Configuration for default settings
 config = {
-    # Paths for data import
+    # Paths for Import Data
     "accel_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv",  # Path to the accelerometer data
-    "reports_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/Cleaned_SelfReports.csv",  # Path to the self-reports data
+    #"accel_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/single_participant_positive_high.csv",  # Path to the accelerometer data
+    "reports_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/Cleaned_Selfreports.csv",  # Path to the self-reports data
     "combined_data_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min_labels_valence_arousal.csv",  # Path to the combined data
     "features_data_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/features_window_60_step_20_all_features.csv",  # Path to the features data
     "model_path": "/Users/anhducduong/Documents/GitHub/MainPipelineRepo/xgboost_best_model_arousal.pkl",  # Path to the trained model
-    
+
     # Configuration for default settings
     "label_columns": ["valence", "arousal"],  # Columns for target labels
     "target_label": "arousal",  # Target label for training
 
     # Configuration for data import
-    # "accel_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/AccelerometerMeasurements_backup.csv",  # Path to the accelerometer data
-    # "reports_path": "C:/Users/duong/Documents/GitHub/MainPipelineRepo/SelfReports_backup.csv",  # Path to the self-reports data
     "time_window": 2,  # Time window in minutes
     "scaler_type": "standard",  # 'standard' or 'minmax'
     "bin_size_minutes": 3,  # Bin size in minutes

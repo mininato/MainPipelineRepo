@@ -4,8 +4,7 @@ from _config import config
 import time
 
 combining_dataframes_pipeline = Pipeline([
-    ('import_data', ImportData(accel_path=config['accel_path'], # input path to accelerometer data
-                               reports_path=config['reports_path'])),  # input path to self-reports data),
+    ('import_data', ImportData(use_accel=True, use_reports=True, use_combined=False, use_features=False)),  # input path to self-reports data),
     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
 ])
 

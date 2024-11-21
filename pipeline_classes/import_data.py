@@ -4,11 +4,12 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from _config import config
 
 class ImportData(BaseEstimator, TransformerMixin):
-    def __init__(self, accel_path=config["accel_path"], reports_path=config["reports_path"], combined_data_path=config["combined_data_path"], features_data_path=config["features_data_path"]):
-        self.accel_path = accel_path if accel_path is not None else config["accel_path"]
-        self.reports_path = reports_path if reports_path is not None else config["reports_path"]
-        self.combined_data_path = combined_data_path if combined_data_path is not None else config["combined_data_path"]
-        self.features_data_path = features_data_path if features_data_path is not None else config["features_data_path"]
+    def __init__(self, use_accel=True, use_reports=True, use_combined=False, use_features=False):
+        # Dynamically assign file paths based on usage
+        self.accel_path = config["accel_path"] if use_accel else None
+        self.reports_path = config["reports_path"] if use_reports else None
+        self.combined_data_path = config["combined_data_path"] if use_combined else None
+        self.features_data_path = config["features_data_path"] if use_features else None
 
     def fit(self, X, y=None):
         return self

@@ -5,8 +5,8 @@ import joblib
 from _config import config
 
 class ClassifyMovementData(BaseEstimator, TransformerMixin):
-    def __init__(self, model_path):
-        self.model_path = model_path
+    def __init__(self, model_path=None):
+        self.model_path = model_path if model_path else config.get("model_path")
         self.model = None
 
     def fit(self, X, y=None):

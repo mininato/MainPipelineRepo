@@ -5,7 +5,7 @@ import time
 
 # Feature extraction pipeline part (takes combined dataframe as input)
 feature_extraction_pipeline = Pipeline([
-    ('import_data', ImportData(combined_data_path="/Users/anhducduong/Documents/GitHub/MainPipelineRepo/combined_data_timewindow_2min_labels_valence_arousal.csv")), # input path to combined data
+    ('import_data', ImportData(use_accel=False, use_reports=False, use_combined=True, use_features=False)), # input path to combined data
     ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
     ('scale_xyz_data', ScaleXYZData(scaler_type=config["scaler_type"])),
     ('extract_features', ExtractFeatures(window_length=config["window_length"],
