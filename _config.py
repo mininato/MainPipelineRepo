@@ -34,7 +34,7 @@ config = {
 
     # Configuration for model training
     "classifier": "xgboost",  # Default classifier ('xgboost', 'svm', 'randomforest')
-    "target": "combined",  # Target to train ('combined', 'arousal', 'valence')
+    # "target": "combined",  # Target to train ('combined', 'arousal', 'valence')
 
     # Configuration for hyperparameter tuning
     "n_splits": 5,
