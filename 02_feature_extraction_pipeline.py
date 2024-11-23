@@ -3,7 +3,7 @@ from pipeline_classes import ImportData, LowPassFilter, ScaleXYZData, ExtractFea
 from _config import config
 import time
 
-# Feature extraction pipeline part (takes combined dataframe as input)
+# This pipeline extracts features from the combined dataframe and exports it to a csv file
 feature_extraction_pipeline = Pipeline([
     ('import_data', ImportData(use_accel=False, use_reports=False, use_combined=True, use_features=False)), # input path to combined data
     ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
@@ -16,8 +16,12 @@ feature_extraction_pipeline = Pipeline([
                                          label_columns=config["label_columns"])),
 ])
 
-# Run training_model_pipeline
+# This will measure the time taken to run the pipeline
 start_time = time.time()
+
+# This will start the pipeline and return the feature dataframe
 output_df = feature_extraction_pipeline.fit_transform(None)
+
+
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")

@@ -20,8 +20,8 @@ class ClassifyMovementData(BaseEstimator, TransformerMixin):
         # Assuming `X` is a DataFrame of pre-extracted features.
         predictions = self.model.predict(X)
 
-        # Adding predictions to the DataFrame
-        X['predicted_emotion'] = predictions
+        # Adding predictions to the DataFrame as the first column
+        X.insert(0, 'predicted_emotion', predictions)
 
         print("Data classified successfully.")
         

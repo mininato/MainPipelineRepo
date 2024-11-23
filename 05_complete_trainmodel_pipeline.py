@@ -3,7 +3,7 @@ from _config import config
 from sklearn.pipeline import Pipeline
 import time
 
-# # Complete training model pipeline
+# This is the complete pipeline that will be used to train a model on the combined dataframe and export the model to a pickle file and general information to a json file
 complete_training_model_pipeline = Pipeline([
     ('import_data', ImportData(use_accel=True, use_reports=True, use_combined=False, use_features=False)),
     ('create_combined_dataframe', CreateCombinedDataFrame(time_window=config["time_window"], label_columns=config["label_columns"])),
@@ -19,8 +19,12 @@ complete_training_model_pipeline = Pipeline([
     ('train_model', TrainModel(config=config)),
 ])
 
-# Run complete_training_model_pipeline
+# This will measure the time taken to run the pipeline
 start_time = time.time()
+
+# This will start the pipeline and return the model and a report
 output_df = complete_training_model_pipeline.fit_transform(None)
+
+
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")

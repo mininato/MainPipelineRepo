@@ -3,7 +3,7 @@ from pipeline_classes import ImportData, LowPassFilter, ScaleXYZData, ExtractFea
 from _config import config
 import time
 
-# # Test user Pipeline
+# This is the pipeline that will be used to analyze data which hasnt been classified yet and export the classified dataframe as a csv file
 analyzing_data_pipeline = Pipeline([
     ('import_data', ImportData(use_accel=True, use_reports=False, use_combined=False, use_features=False)), # input path to accelerometer data)
     ('low_pass_filter', LowPassFilter(cutoff_frequency=config["cutoff_frequency"], sampling_rate=config["data_frequency"], order=config["order"])),
@@ -13,8 +13,12 @@ analyzing_data_pipeline = Pipeline([
     ('classify_movement_data', ClassifyMovementData()),
 ])
 
-# Run pipeline
+# This will measure the time taken to run the pipeline
 start_time = time.time()
+
+# This will start the pipeline and return the classified dataframe
 output_df = analyzing_data_pipeline.fit_transform(None)
+
+
 end_time = time.time()
 print(f"Time taken: {int((end_time - start_time) // 60)} minutes and {(end_time - start_time) % 60:.2f} seconds")
